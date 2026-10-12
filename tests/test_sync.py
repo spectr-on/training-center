@@ -1,0 +1,31 @@
+import sys, pathlib, tempfile
+sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "training_center"))
+from app import db, sync, web
+
+
+class Fake:
+    def __getattr__(self, n):
+        if n.startswith("get_activities_by_date"):
+            return lambda a, b: [{"activityId": 1, "startTimeLocal": "2026-10-08 18:00:00",
+                                  "activityName": "Силовая", "activityType": {"typeKey": "strength_training"}}]
+        if n == "get_activity_exercise_sets":
+            return lambda i: {"exerciseSets": [
+                {"setType": "ACTIVE", "repetitionCount": 5, "weight": 60000.0, "exercises": [{"name": "BENCH_PRESS"}]},
+                {"setType": "REST", "duration": 90}]}
+        if n == "get_hrv_data":
+            raise RuntimeError("нет HRV")
+        return lambda d: {"x": d}
+
+
+def test_sync_and_page():
+    sync.PAUSE = 0
+    con = db.connect(tempfile.mktemp())
+    rid = sync.run_sync(con, Fake, 2, "тест")
+    r = con.execute("SELECT * FROM sync_run WHERE id=?", (rid,)).fetchone()
+    assert r["ok"] == 1 and r["days"] == 2 and r["activities"] == 1 and r["sets"] == 2
+    assert "hrv" in r["errors"]
+    p = web.page(con, {"weight_divisor": 1000.0})
+    assert "60.0" in p and "BENCH_PRESS" in p
+    # повторный запуск не дублирует подходы
+    sync.run_sync(con, Fake, 2, "тест")
+    assert con.execute("SELECT COUNT(*) FROM workout_set").fetchone()[0] == 2
