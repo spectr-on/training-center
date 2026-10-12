@@ -5,6 +5,7 @@ from datetime import date, datetime
 import yaml
 
 from .blocks import group_blocks
+from . import garmin_workout as gw
 
 STEP_DEFAULT = {"barbell": 5, "dumbbell": 2.5}
 
@@ -103,6 +104,13 @@ def validate(d):
                 ws = x.get("weights")
                 if not (isinstance(ws, list) and ws and all(_num(v) and v >= 0 for v in ws)):
                     e.append(f"{n}: weights — список весов по подходам в кг (0 = свой вес)")
+                rs = x.get("rest_sec")
+                if rs is not None and not (isinstance(rs, int) and 0 < rs <= 900):
+                    e.append(f"{n}: rest_sec — отдых после подхода, секунды (1–900)")
+            if b["type"] == "superset":
+                lens = {len(x.get("weights") or []) for x in exs if isinstance(x, dict)}
+                if len(lens) > 1:
+                    e.append(f"{w}, блок {bi}: в суперсете у всех упражнений должно быть одинаковое число подходов (weights)")
     return e
 
 
@@ -156,6 +164,8 @@ def build_draft(con, divisor=1000.0):
             continue
         sets = [dict(exercise=r["exercise"], reps=r["reps"] or 0, kg=(r["weight_raw"] or 0) / divisor)
                 for r in con.execute("SELECT * FROM workout_set WHERE activity_id=? AND set_type='ACTIVE' ORDER BY idx", (a["id"],))]
+        rests = gw.rest_by_code(con, a["id"])
+        cats = gw.category_map(con)
         blocks = []
         for b in group_blocks(sets):
             codes = []
@@ -167,8 +177,12 @@ def build_draft(con, divisor=1000.0):
                 mine = [x for x in b["items"] if x["exercise"] == c]
                 top = max(x["reps"] for x in mine)
                 ws = [round(x["kg"], 2) if round(x["kg"], 2) % 1 else int(round(x["kg"])) for x in mine]
-                exs.append({"code": c, "equipment": equipment_of(c, ws),
-                            "reps": [max(1, top - 2), top], "weights": ws})
+                ex = {"code": c, "equipment": equipment_of(c, ws), "reps": [max(1, top - 2), top], "weights": ws,
+                      "rest_sec": rests.get(c, gw.DEFAULT_REST)}
+                cat = cats.get(c) or gw.guess_category(c)
+                if cat:
+                    ex["category"] = cat
+                exs.append(ex)
             blocks.append({"type": b["kind"], "exercises": exs})
         data["sessions"].append({"key": key, "name": f"Full Body {key}", "kind": "strength",
                                  "day": 0 if key == "A" else 4, "blocks": blocks,

@@ -22,8 +22,14 @@ def mkdb():
     con = db.connect(tempfile.mktemp())
     def act(i, day, name, sets):
         con.execute("INSERT INTO activity VALUES(?,?,?,?,?)", (i, f"{day} 10:00:00", "strength_training", name, "{}"))
-        for n, (ex, reps, kg) in enumerate(sets):
-            con.execute("INSERT INTO workout_set VALUES(?,?,?,?,?,?,?,?,?)", (i, n, "ACTIVE", ex, reps, kg * 1000.0, None, None, "{}"))
+        n = 0
+        cat = {"BARBELL_BACK_SQUAT": "SQUAT", "NEUTRAL_GRIP_PULL_UP": "PULL_UP", "DUMBBELL_BICEPS_CURL": "CURL",
+               "DUMBBELL_LYING_TRICEPS_EXTENSION": "TRICEPS_EXTENSION", "BARBELL_FRONT_SQUAT": "SQUAT"}
+        for ex, reps, kg in sets:
+            con.execute("INSERT INTO workout_set VALUES(?,?,?,?,?,?,?,?,?)", (i, n, "ACTIVE", ex, reps, kg * 1000.0, None, None,
+                        json.dumps({"exercises": [{"category": cat.get(ex), "name": ex}]})))
+            con.execute("INSERT INTO workout_set VALUES(?,?,?,?,?,?,?,?,?)", (i, n + 1, "REST", None, None, None, 130.0, None, "{}"))
+            n += 2
     A = [("BARBELL_BACK_SQUAT", 8, 90), ("BARBELL_BACK_SQUAT", 8, 95), ("BARBELL_BACK_SQUAT", 8, 95),
          ("NEUTRAL_GRIP_PULL_UP", 7, 0), ("NEUTRAL_GRIP_PULL_UP", 7, 0),
          ("DUMBBELL_BICEPS_CURL", 10, 10), ("DUMBBELL_LYING_TRICEPS_EXTENSION", 10, 10),

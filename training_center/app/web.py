@@ -2,7 +2,7 @@
 import html, threading
 from .blocks import group_blocks
 from .exercise_names import ru, overrides_status
-from . import traffic, plan, program, settings as stg
+from . import traffic, plan, program, sync, garmin_workout as gw, settings as stg
 from datetime import date, timedelta
 import json as _json
 from urllib.parse import parse_qs, urlparse
@@ -135,7 +135,10 @@ def program_html(con, notice=None, editor_text=None):
             if s["kind"] != "strength":
                 h.append(f"<h3>{e(s['name'])}</h3><p>Бег, без упражнений.</p>")
                 continue
-            h.append(f"<h3>{e(s['name'])}</h3>")
+            sent = con.execute("SELECT * FROM garmin_workout WHERE session_key=?", (s["key"],)).fetchone()
+            sent_txt = f" Отправлено в Garmin: «{e(sent['name'])}», {e(sent['updated_at'])}." if sent else " В Garmin ещё не отправлялась."
+            h.append(f"<h3>{e(s['name'])}</h3><form method=post action=garmin_send><input type=hidden name=key value='{e(s['key'])}'>"
+                     f"<button>Отправить в Garmin</button><small>{sent_txt}</small></form>")
             for b in s["blocks"]:
                 lines = "".join(f"<div><b>{e(ru(x['code']))}</b>: {'/'.join(f'{w:g}' for w in x['weights'])} кг · повторы {x['reps'][0]}–{x['reps'][1]}</div>" for x in b["exercises"])
                 h.append(f"<div class={'ss' if b['type'] == 'superset' else 'ex'}>{'<span class=tag>Суперсет</span>' if b['type'] == 'superset' else ''}{lines}</div>")
@@ -145,6 +148,8 @@ def program_html(con, notice=None, editor_text=None):
     else:
         h.append("<p>Программы пока нет. Создай черновик из последних тренировок Garmin «Full Body A» и «Full Body B».</p>")
     h.append("<form method=post action=draft><button>Создать черновик из Garmin</button></form>")
+    if data:
+        h.append("<form method=post action=enrich><button>Дополнить программу из Garmin (отдых и категории)</button></form>")
     text = editor_text
     if text is None:
         text = draft["yaml"] if draft and (not row or draft["id"] > row["id"]) else (row["yaml"] if row else "")
@@ -242,6 +247,27 @@ def serve(con, cfg, start_sync, port=8099):
                     msg = "<b>Не сохранено.</b><ul>" + "".join(f"<li>{html.escape(x)}</li>" for x in errs) + "</ul>"
                     return self._send(200, page(con, cfg, notice=msg, editor_text=text).encode())
                 program.save_version(con, text, "ручная", "сохранено вручную", True)
+            elif path.endswith("garmin_send"):
+                key = (form.get("key") or [""])[0]
+                row, data = program.active(con)
+                sess = next((s for s in (data or {}).get("sessions", []) if s["key"] == key and s["kind"] == "strength"), None)
+                if not sess:
+                    return self._send(200, page(con, cfg, notice="Тренировка не найдена в активной программе.").encode())
+                try:
+                    api = (cfg.get("api_factory") or (lambda: sync.login(cfg["token_dir"])))()
+                    wid, mode = gw.send(api, con, sess, gw.category_map(con))
+                    lines = "".join(f"<li>{html.escape(x)}</li>" for x in gw.summary(sess))
+                    msg = (f"<b>Тренировка {mode} в Garmin Connect:</b> «{html.escape(gw.garmin_name(sess))}» (№{wid}). "
+                           f"Теперь отправь её на часы из Garmin Connect.<ul>{lines}</ul>")
+                except Exception as ex:
+                    msg = f"<b>Не отправлено:</b> {html.escape(str(ex))}"
+                return self._send(200, page(con, cfg, notice=msg).encode())
+            elif path.endswith("enrich"):
+                row, data = program.active(con)
+                if data:
+                    n = gw.enrich(con, data)
+                    if n:
+                        program.save_version(con, program.dump(data), "ручная", f"дополнено из Garmin (отдых, категории): {n} знач.", True)
             elif path.endswith("rollback"):
                 v = (form.get("id") or [""])[0]
                 if v.isdigit():

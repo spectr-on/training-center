@@ -20,6 +20,10 @@ MIGRATIONS = [
     CREATE TABLE progress_log(activity_id INTEGER, code TEXT, at TEXT, text TEXT,
         PRIMARY KEY(activity_id, code));
     """,
+    # 3
+    """
+    CREATE TABLE garmin_workout(session_key TEXT PRIMARY KEY, workout_id INTEGER, name TEXT, updated_at TEXT);
+    """,
 ]
 
 
