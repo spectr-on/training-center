@@ -65,7 +65,10 @@ def traffic_html(con):
         return [f"<h2>Светофор</h2><p>За {d} данных пока нет. Нажми «Синхронизировать с Garmin».</p>"]
     color, why, notes = traffic.decide(m)
     f = lambda v, u="": "—" if v is None else f"{v}{u}"
-    vals = (f"Readiness {f(m['readiness'])} · Body Battery {f(m['bb'])}{m['bb_note']} · сон {f(m['sleep_h'], ' ч')}"
+    rn = "" if m["readiness_now"] in (None, m["readiness"]) else f", сейчас {m['readiness_now']} ({m['readiness_now_at']})"
+    bn = "" if m["bb_now"] in (None, m["bb"]) else f", сейчас {m['bb_now']}"
+    ra = f" ({m['readiness_at']})" if m["readiness_at"] else ""
+    vals = (f"Утренние значения: Readiness {f(m['readiness'])}{ra}{rn} · Body Battery {f(m['bb'])}{m['bb_note']}{bn} · сон {f(m['sleep_h'], ' ч')}"
             f" (Sleep Score {f(m['sleep_score'])}) · HRV {f(m['hrv'])} · пульс покоя {f(m['rhr'])}")
     h = [f"<h2>Светофор на {d}</h2><div class='tl {color}'><b>{TL_NAME[color]}</b><br>{e('; '.join(why))}<br>"
          f"<b>План:</b> {e(traffic.PLANS[color])}<br><small>{e(vals)}</small>"]

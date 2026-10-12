@@ -59,3 +59,18 @@ def test_page_renders():
     mk(con, date.today().isoformat(), 75, 85, 7.5, 50, 55)
     p = web.page(con, {"weight_divisor": 1000.0})
     assert "Светофор" in p and "Зелёный" in p and "Недельный план" in p
+
+
+def test_morning_vs_now():
+    con = db.connect(tempfile.mktemp())
+    d = "2026-10-12"
+    put(con, d, "readiness", [
+        {"timestampLocal": "2026-10-12T19:30:00", "score": 38, "inputContext": "AFTER_POST_EXERCISE_RESET"},
+        {"timestampLocal": "2026-10-12T07:00:00", "score": 72, "inputContext": "AFTER_WAKEUP_RESET"}])
+    put(con, d, "stats", {"bodyBatteryAtWakeTime": 90, "bodyBatteryMostRecentValue": 33})
+    m = traffic.metrics(con, d)
+    assert m["readiness"] == 72 and m["readiness_now"] == 38 and m["bb"] == 90 and m["bb_now"] == 33
+    # без метки пробуждения берётся самая ранняя запись дня
+    put(con, d, "readiness", [{"timestampLocal": "2026-10-12T19:30:00", "score": 38},
+                              {"timestampLocal": "2026-10-12T07:05:00", "score": 70}])
+    assert traffic.metrics(con, d)["readiness"] == 70

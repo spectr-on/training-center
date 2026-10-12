@@ -36,10 +36,17 @@ def _raw(con, d, kind):
 def metrics(con, d):
     stats, sleep, hrv, rd = (_raw(con, d, k) for k in ("stats", "sleep", "hrv", "readiness"))
     m = {}
-    entry = rd
-    if isinstance(rd, list) and rd:
-        entry = next((x for x in rd if isinstance(x, dict) and x.get("inputContext") == "AFTER_WAKEUP_RESET"), rd[0])
-    m["readiness"] = find_key(entry, "score") if entry else None
+    entries = [x for x in rd if isinstance(x, dict)] if isinstance(rd, list) else ([rd] if isinstance(rd, dict) else [])
+
+    def ts(x):
+        return str(x.get("timestampLocal") or x.get("timestamp") or "")
+    entries.sort(key=ts)
+    morning = next((x for x in entries if x.get("inputContext") == "AFTER_WAKEUP_RESET"), entries[0] if entries else None)
+    latest = entries[-1] if entries else None
+    m["readiness"] = find_key(morning, "score") if morning else None
+    m["readiness_now"] = find_key(latest, "score") if latest else None
+    m["readiness_at"] = ts(morning)[11:16] if morning else ""
+    m["readiness_now_at"] = ts(latest)[11:16] if latest else ""
     sec = find_key(sleep, "sleepTimeSeconds") if sleep else None
     m["sleep_h"] = None if sec is None else round(sec / 3600, 1)
     sc = find_key(sleep, "sleepScores") if sleep else None
@@ -53,6 +60,7 @@ def metrics(con, d):
         bb = find_key(stats, "bodyBatteryHighestValue")
         m["bb_note"] = " (макс. за день)" if bb is not None else ""
     m["bb"] = bb
+    m["bb_now"] = find_key(stats, "bodyBatteryMostRecentValue") if stats else None
     return m
 
 
