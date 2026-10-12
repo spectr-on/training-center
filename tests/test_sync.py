@@ -10,7 +10,7 @@ class Fake:
                                   "activityName": "Силовая", "activityType": {"typeKey": "strength_training"}}]
         if n == "get_activity_exercise_sets":
             return lambda i: {"exerciseSets": [
-                {"setType": "ACTIVE", "repetitionCount": 5, "weight": 60000.0, "exercises": [{"name": "BENCH_PRESS"}]},
+                {"setType": "ACTIVE", "repetitionCount": 5, "weight": 60000.0, "exercises": [{"name": "BARBELL_BENCH_PRESS"}]},
                 {"setType": "REST", "duration": 90}]}
         if n == "get_hrv_data":
             raise RuntimeError("нет HRV")
