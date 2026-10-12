@@ -1,0 +1,16 @@
+name: Тренировочный центр
+version: "0.0.1"
+slug: training_center
+description: Синхронизация Garmin, план тренировок, светофор и отчёты
+arch: [amd64, aarch64]
+startup: application
+boot: auto
+init: false
+ingress: true
+ingress_port: 8099
+panel_icon: mdi:dumbbell
+panel_title: Тренировки
+map:
+  - addon_config:rw
+options: {}
+schema: {}
