@@ -40,3 +40,16 @@ def test_blocks_and_names():
     assert len(b[1]["items"]) == 4
     assert [x["kind"] for x in group_blocks([{"exercise": x} for x in "AAABBB"])] == ["single", "single"]
     assert ru("BARBELL_BENCH_PRESS") == "Жим штанги лёжа" and ru("WEIRD_THING").endswith("⁇")
+
+
+def test_new_names_and_overrides(tmp_path=None):
+    import tempfile, json, pathlib
+    from app import exercise_names as en
+    assert en.ru("WIDE_GRIP_PULL_UP") == "Подтягивания широким хватом"
+    assert en.ru("Lying dumbbell pullover to extension") == "Французский жим гантелей (лёжа)"
+    f = pathlib.Path(tempfile.mktemp()); f.write_text(json.dumps({"WEIRD_THING": "Моё упражнение"}), encoding="utf-8")
+    old = en.OVERRIDES_FILE; en.OVERRIDES_FILE = f
+    try:
+        assert en.ru("WEIRD_THING") == "Моё упражнение"
+    finally:
+        en.OVERRIDES_FILE = old

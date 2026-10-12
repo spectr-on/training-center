@@ -40,13 +40,33 @@ NAMES = {
     "HANGING_LEG_RAISE": "Подъём ног в висе", "FACE_PULL": "Тяга к лицу",
     "SHRUG": "Шраги", "DUMBBELL_SHRUG": "Шраги с гантелями", "BARBELL_SHRUG": "Шраги со штангой",
     "CABLE_CROSSOVER": "Сведение рук на блоках", "DUMBBELL_FLYE": "Разведение гантелей лёжа",
+    "WIDE_GRIP_PULL_UP": "Подтягивания широким хватом",
+    "LYING_DUMBBELL_PULLOVER_TO_EXTENSION": "Французский жим гантелей (лёжа)",
+    "SINGLE_ARM_DUMBBELL_OVERHEAD_TRICEPS_EXTENSION": "Французский жим гантели одной рукой над головой",
     "REVERSE_FLYE": "Разведение в наклоне на заднюю дельту",
 }
+
+
+import json
+from pathlib import Path
+
+OVERRIDES_FILE = Path("/config/exercise_names.json")  # свои названия: {"КОД_GARMIN": "Название"}
+
+
+def _overrides():
+    try:
+        return json.loads(OVERRIDES_FILE.read_text(encoding="utf-8"))
+    except Exception:  # файла нет или он испорчен — не мешаем работе
+        return {}
 
 
 def ru(code):
     if not code:
         return "—"
+    code = code.strip().upper().replace(" ", "_")
+    own = _overrides()
+    if code in own:
+        return own[code]
     if code in NAMES:
         return NAMES[code]
     return code.replace("_", " ").capitalize() + " ⁇"
