@@ -25,7 +25,18 @@ def test_sync_and_page():
     assert r["ok"] == 1 and r["days"] == 2 and r["activities"] == 1 and r["sets"] == 2
     assert "hrv" in r["errors"]
     p = web.page(con, {"weight_divisor": 1000.0})
-    assert "60.0" in p and "BENCH_PRESS" in p
+    assert "60 кг × 5" in p and "Жим штанги лёжа" in p and "Силовая" in p
     # повторный запуск не дублирует подходы
     sync.run_sync(con, Fake, 2, "тест")
     assert con.execute("SELECT COUNT(*) FROM workout_set").fetchone()[0] == 2
+
+
+def test_blocks_and_names():
+    from app.blocks import group_blocks
+    from app.exercise_names import ru
+    seq = list("SSS") + list("CTCT") + list("LLL")
+    b = group_blocks([{"exercise": x} for x in seq])
+    assert [x["kind"] for x in b] == ["single", "superset", "single"]
+    assert len(b[1]["items"]) == 4
+    assert [x["kind"] for x in group_blocks([{"exercise": x} for x in "AAABBB"])] == ["single", "single"]
+    assert ru("BARBELL_BENCH_PRESS") == "Жим штанги лёжа" and ru("WEIRD_THING").endswith("⁇")
