@@ -13,6 +13,13 @@ MIGRATIONS = [
     CREATE TABLE sync_run(id INTEGER PRIMARY KEY AUTOINCREMENT, started_at TEXT, finished_at TEXT,
         trigger TEXT, ok INTEGER, days INTEGER, activities INTEGER, sets INTEGER, errors TEXT);
     """,
+    # 2
+    """
+    CREATE TABLE program_version(id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT, kind TEXT,
+        note TEXT, yaml TEXT, active INTEGER DEFAULT 0);
+    CREATE TABLE progress_log(activity_id INTEGER, code TEXT, at TEXT, text TEXT,
+        PRIMARY KEY(activity_id, code));
+    """,
 ]
 
 

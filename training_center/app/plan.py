@@ -39,17 +39,19 @@ def week_status(con, settings, mon, today):
                 found[s["key"]] = a; used.add(a["id"]); break
     out = []
     for s in slots:
-        planned = mon + timedelta(days=s["day"])
+        planned = None if s["day"] is None else mon + timedelta(days=s["day"])
         a = found.get(s["key"])
         if a:
             done_day = date.fromisoformat(a["start_local"][:10])
-            st = "done" if done_day == planned else "moved"
+            st = "done" if (planned is None or done_day == planned) else "moved"
             when = done_day
         else:
             when = planned
             week_over = today > mon + timedelta(days=6)
             if week_over:
                 st = "missed"
+            elif planned is None:
+                st = "planned"
             elif planned == today:
                 st = "today"
             elif planned < today:

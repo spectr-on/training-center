@@ -22,3 +22,14 @@ def load():
 def save(d):
     FILE.parent.mkdir(parents=True, exist_ok=True)
     FILE.write_text(json.dumps(d, ensure_ascii=False, indent=1), encoding="utf-8")
+
+
+def day_overrides():
+    d = load()
+    return d.get("days") or {}
+
+
+def set_days(days):
+    d = load()
+    d["days"] = days
+    save(d)

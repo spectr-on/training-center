@@ -1,5 +1,5 @@
 import threading, time
-from . import db, sync, web
+from . import db, sync, web, progress
 
 CFG = {"weight_divisor": 1000.0, "token_dir": "/config/garmin", "db": "/data/training.db",
        "auto_hours": 3, "days_first": 30, "days_regular": 3}
@@ -16,6 +16,10 @@ def main():
         c = db.connect(CFG["db"])
         if sync.run_sync(c, lambda: sync.login(CFG["token_dir"]), days, trigger) and first:
             first = c.execute("SELECT COUNT(*) FROM sync_run WHERE ok=1").fetchone()[0] == 0
+        try:
+            progress.apply_all(c, CFG["weight_divisor"])
+        except Exception as e:  # noqa — сбой прибавки не должен ломать синхронизацию
+            print("Ошибка расчёта прибавки веса:", e, flush=True)
 
     def loop():
         start_sync("при запуске")
