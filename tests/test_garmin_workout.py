@@ -25,20 +25,19 @@ def test_build_structure():
     A = d["sessions"][0]
     w = gw.build_workout(A, "Full Body A · ТЦ", gw.category_map(con))
     steps = w["workoutSegments"][0]["workoutSteps"]
-    # присед 90/95/95 -> две группы подряд: 1×90 и 2×95
-    g1, g2 = steps[0], steps[1]
-    assert (g1["numberOfIterations"], g2["numberOfIterations"]) == (1, 2)
+    # присед 90/95/95 -> ОДНА группа из 3 подходов, вес группы = наибольший (95)
+    g1 = steps[0]
+    assert g1["numberOfIterations"] == 3 and len(steps) == 3   # присед, подтягивания, суперсет
     ex1, rest1 = g1["workoutSteps"]
-    assert ex1["weightValue"] == 90 and ex1["weightUnit"]["unitKey"] == "kilogram"        # кг как есть, без ×1000
-    assert g2["workoutSteps"][0]["weightValue"] == 95
+    assert ex1["weightValue"] == 95 and ex1["weightUnit"]["unitKey"] == "kilogram"        # кг как есть, без ×1000
     assert ex1["endConditionValue"] == 8.0 and ex1["category"] == "SQUAT" and ex1["exerciseName"] == "BARBELL_BACK_SQUAT"
     assert rest1["stepType"]["stepTypeKey"] == "rest" and rest1["endConditionValue"] == 135.0
     # подтягивания со своим весом: без веса
-    pull = steps[2]["workoutSteps"][0]
+    pull = steps[1]["workoutSteps"][0]
     assert pull["weightValue"] is None and pull["weightUnit"] is None
     # суперсет: одна группа из 4 шагов (упр, отдых, упр, отдых), 2 круга
     ss = steps[-1]
-    assert ss["numberOfIterations"] == 2 and [c["stepType"]["stepTypeKey"] for c in ss["workoutSteps"]] == ["interval", "rest", "interval", "rest"]
+    assert ss["numberOfIterations"] == 2 and ss["workoutSteps"][0]["weightValue"] == 10 and [c["stepType"]["stepTypeKey"] for c in ss["workoutSteps"]] == ["interval", "rest", "interval", "rest"]
     # нумерация шагов сквозная, childStepId = номер группы
     orders = []
     def walk(n):
@@ -116,3 +115,9 @@ def test_enrich_and_web_send():
     assert "создана" in page and "Приседания со штангой на спине" in page and "по 95 кг" in page
     assert api.calls[0] == ("upload", "Full Body A · ТЦ")
     assert "Не отправлено" in post("garmin_send", key="ZZ") or "не найдена" in post("garmin_send", key="ZZ")
+
+
+def test_summary_mentions_max_weight():
+    con, _ = tp.mkdb()
+    lines = gw.summary(prog(con)["sessions"][0])
+    assert "3×8 по 95 кг" in lines[0] and "90/95/95" in lines[0]

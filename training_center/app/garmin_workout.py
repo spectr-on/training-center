@@ -98,15 +98,10 @@ def _step(order, child, kind, **kw):
 
 
 def _chunks(exs):
+    """Одна группа на блок: число кругов = число подходов, вес группы = наибольший вес упражнения
+    (в Garmin у группы один вес; по подходам план хранится только в HA)."""
     n = len(exs[0]["weights"])
-    vec = [tuple(x["weights"][i] for x in exs) for i in range(n)]
-    out = []
-    for v in vec:
-        if out and out[-1][0] == v:
-            out[-1][1] += 1
-        else:
-            out.append([v, 1])
-    return out
+    return [[tuple(max(x["weights"]) for x in exs), n]]
 
 
 def build_workout(session, name, cats):
@@ -152,13 +147,13 @@ def build_workout(session, name, cats):
 def summary(session):
     lines = []
     for b in session["blocks"]:
-        exs = b["exercises"]
         parts = []
-        for x in exs:
-            ws = []
-            for w, c in [(v, sum(1 for _ in g)) for v, g in __import__("itertools").groupby(x["weights"])]:
-                ws.append(f"{c}×{x['reps'][1]} " + (f"по {w:g} кг" if w else "свой вес"))
-            parts.append(f"{ru(x['code'])}: " + "; ".join(ws) + f"; отдых {x.get('rest_sec') or DEFAULT_REST} с")
+        for x in b["exercises"]:
+            top = max(x["weights"])
+            txt = f"{len(x['weights'])}×{x['reps'][1]} " + (f"по {top:g} кг" if top else "свой вес")
+            if len(set(x["weights"])) > 1:
+                txt += f" (в Garmin — наибольший вес; план по подходам: {'/'.join(f'{w:g}' for w in x['weights'])})"
+            parts.append(f"{ru(x['code'])}: {txt}; отдых {x.get('rest_sec') or DEFAULT_REST} с")
         lines.append(("Суперсет — " if b["type"] == "superset" else "") + " | ".join(parts))
     return lines
 
