@@ -65,8 +65,8 @@ def traffic_html(con):
         return [f"<h2>Светофор</h2><p>За {d} данных пока нет. Нажми «Синхронизировать с Garmin».</p>"]
     color, why, notes = traffic.decide(m)
     f = lambda v, u="": "—" if v is None else f"{v}{u}"
-    rn = "" if m["readiness_now"] in (None, m["readiness"]) else f", сейчас {m['readiness_now']} ({m['readiness_now_at']})"
-    bn = "" if m["bb_now"] in (None, m["bb"]) else f", сейчас {m['bb_now']}"
+    rn = "" if m["readiness_now"] in (None, m["readiness"]) else f", последнее обновление Garmin {m['readiness_now']} ({m['readiness_now_at']})"
+    bn = "" if m["bb_now"] in (None, m["bb"]) else f", на последней синхронизации {m['bb_now']}"
     ra = f" ({m['readiness_at']})" if m["readiness_at"] else ""
     vals = (f"Утренние значения: Readiness {f(m['readiness'])}{ra}{rn} · Body Battery {f(m['bb'])}{m['bb_note']}{bn} · сон {f(m['sleep_h'], ' ч')}"
             f" (Sleep Score {f(m['sleep_score'])}) · HRV {f(m['hrv'])} · пульс покоя {f(m['rhr'])}")
