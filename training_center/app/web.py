@@ -1,7 +1,7 @@
 """Страница статуса (ingress). Только стандартная библиотека. Все ссылки относительные."""
 import html, threading
 from .blocks import group_blocks
-from .exercise_names import ru
+from .exercise_names import ru, overrides_status
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 STYLE = ("body{font-family:system-ui;max-width:900px;margin:16px auto;padding:0 16px}"
@@ -70,7 +70,7 @@ def page(con, cfg):
                 for r in con.execute("SELECT * FROM workout_set WHERE activity_id=? AND set_type='ACTIVE' ORDER BY idx", (a["id"],))]
         for b in group_blocks(sets):
             h.append(block_html(b))
-    h.append(f"<p><small>Вес = значение Garmin / {div}. Суперсет определяется по чередованию упражнений. Знак ⁇ — названия нет в словаре.</small></p>")
+    h.append(f"<p><small>Вес = значение Garmin / {div}. Суперсет определяется по чередованию упражнений. Знак ⁇ — названия нет в словаре. Свои названия: {e(overrides_status())}.</small></p>")
     return f"<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'><style>{STYLE}</style>" + "".join(h)
 
 

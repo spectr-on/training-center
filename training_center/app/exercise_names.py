@@ -43,6 +43,7 @@ NAMES = {
     "WIDE_GRIP_PULL_UP": "Подтягивания широким хватом",
     "LYING_DUMBBELL_PULLOVER_TO_EXTENSION": "Французский жим гантелей (лёжа)",
     "SINGLE_ARM_DUMBBELL_OVERHEAD_TRICEPS_EXTENSION": "Французский жим гантели одной рукой над головой",
+    "OVERHEAD_DUMBBELL_PRESS": "Жим гантелей над головой",
     "REVERSE_FLYE": "Разведение в наклоне на заднюю дельту",
 }
 
@@ -53,11 +54,26 @@ from pathlib import Path
 OVERRIDES_FILE = Path("/config/exercise_names.json")  # свои названия: {"КОД_GARMIN": "Название"}
 
 
-def _overrides():
+def _load():
+    """Возвращает (словарь, статус-текст)."""
+    f = OVERRIDES_FILE
+    if not f.exists():
+        return {}, f"файл не найден: {f}"
     try:
-        return json.loads(OVERRIDES_FILE.read_text(encoding="utf-8"))
-    except Exception:  # файла нет или он испорчен — не мешаем работе
-        return {}
+        data = json.loads(f.read_text(encoding="utf-8-sig"))
+        if not isinstance(data, dict):
+            return {}, "в файле должен быть объект {\"КОД\": \"Название\"}"
+        return {str(k).strip().upper().replace(" ", "_"): v for k, v in data.items()}, f"прочитан, записей: {len(data)}"
+    except Exception as e:
+        return {}, f"ошибка чтения: {e}"
+
+
+def _overrides():
+    return _load()[0]
+
+
+def overrides_status():
+    return _load()[1]
 
 
 def ru(code):
