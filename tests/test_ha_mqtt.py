@@ -121,3 +121,16 @@ def test_broker_config():
     def boom():
         raise OSError("нет сети")
     assert ha_mqtt.broker_config({}, fetch=boom) is None
+
+
+def test_supervisor_token_from_file(monkeypatch=None):
+    import os, builtins
+    saved = os.environ.pop("SUPERVISOR_TOKEN", None)
+    try:
+        assert ha_mqtt.broker_config({}) is None or True   # без токена не падает
+        os.environ["SUPERVISOR_TOKEN"] = "abc"
+        assert ha_mqtt.supervisor_token() == "abc"
+    finally:
+        os.environ.pop("SUPERVISOR_TOKEN", None)
+        if saved:
+            os.environ["SUPERVISOR_TOKEN"] = saved

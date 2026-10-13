@@ -200,14 +200,30 @@ def _options():
         return {}
 
 
+def supervisor_token():
+    """Токен Supervisor: из окружения, а если s6 его не передал — из /run/s6/container_environment."""
+    t = os.environ.get("SUPERVISOR_TOKEN")
+    if t:
+        return t
+    for f in ("/run/s6/container_environment/SUPERVISOR_TOKEN", "/var/run/s6/container_environment/SUPERVISOR_TOKEN"):
+        try:
+            t = Path(f).read_text(encoding="utf-8").strip()
+            if t:
+                return t
+        except Exception:
+            pass
+    return None
+
+
 def broker_config(opts=None, fetch=None):
     """Брокер: сначала настройки аддона, затем сервис Supervisor (Mosquitto из магазина HA)."""
     o = _options() if opts is None else opts
     if o.get("mqtt_host"):
         return {"host": o["mqtt_host"], "port": int(o.get("mqtt_port") or 1883),
                 "username": o.get("mqtt_user") or None, "password": o.get("mqtt_password") or None, "tls": False}
-    token = os.environ.get("SUPERVISOR_TOKEN")
+    token = supervisor_token()
     if not token and fetch is None:
+        print("MQTT: нет SUPERVISOR_TOKEN — не могу спросить у Supervisor данные брокера", flush=True)
         return None
     try:
         if fetch:
@@ -224,7 +240,7 @@ def broker_config(opts=None, fetch=None):
 
 def fire_bus_event(payload):
     """Настоящее событие шины HA training_workout_done (по желанию; нужен homeassistant_api в config.yaml)."""
-    token = os.environ.get("SUPERVISOR_TOKEN")
+    token = supervisor_token()
     if not token:
         return False
     try:
