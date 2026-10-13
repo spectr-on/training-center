@@ -2,7 +2,7 @@
 import html, threading
 from .blocks import group_blocks
 from .exercise_names import ru, overrides_status
-from . import traffic, plan, program, sync, timeutil, report, garmin_workout as gw, settings as stg
+from . import traffic, plan, program, sync, timeutil, report, body, garmin_workout as gw, settings as stg
 from datetime import date, timedelta
 import json as _json
 from urllib.parse import parse_qs, urlparse
@@ -10,7 +10,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 STYLE = ("body{font-family:system-ui;max-width:900px;margin:16px auto;padding:0 16px}"
          "table{border-collapse:collapse;width:100%}td,th{border:1px solid #8884;padding:4px 8px;text-align:left}"
-         ".ss{border-left:4px solid #e08a00;background:#e08a0018;padding:6px 10px;margin:8px 0}.ex{padding:4px 10px;margin:8px 0}.tag{display:inline-block;background:#e08a00;color:#fff;border-radius:4px;padding:0 6px;font-size:12px;margin-bottom:4px}.err{background:#c3333320;border-left:4px solid #c33;padding:8px 12px;margin:8px 0}.ok{color:#2a8a2a}.bad{color:#c33}button{padding:10px 18px;font-size:16px}")
+         ".ss{border-left:4px solid #e08a00;background:#e08a0018;padding:6px 10px;margin:8px 0}.ex{padding:4px 10px;margin:8px 0}.tag{display:inline-block;background:#e08a00;color:#fff;border-radius:4px;padding:0 6px;font-size:12px;margin-bottom:4px}.err{background:#c3333320;border-left:4px solid #c33;padding:8px 12px;margin:8px 0}.ok{color:#2a8a2a}.bad{color:#c33}.note{background:#2a8a2a20;border-left:4px solid #2a8a2a;padding:8px 12px;margin:8px 0}.warn{background:#e08a0020;border-left:4px solid #e08a00;padding:8px 12px;margin:8px 0}.f{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:end}.f label{display:flex;flex-direction:column;font-size:13px}.f input{padding:6px;width:110px;font-size:16px}button{padding:10px 18px;font-size:16px}")
 
 
 def fmt_set(x):
@@ -209,13 +209,82 @@ def report_html(con, cfg, text=None, notice=None):
     return h
 
 
-def page(con, cfg, notice=None, editor_text=None, report_text=None):
+def feel_html(con):
+    """Вопрос «как ощущался бег» по пробежкам без ответа."""
+    e = html.escape
+    rows = body.pending_feel(con)
+    if not rows:
+        return []
+    h = ["<h2>Как ощущался бег?</h2>"]
+    for r in rows:
+        opts = "".join(f"<label><input type=radio name=score value={k}> {k} — {e(v)}</label> " for k, v in body.FEEL.items())
+        h.append(f"<form method=post action=run_feel class=warn><input type=hidden name=id value={r['id']}>"
+                 f"<b>{e((r['start_local'] or '')[:16])} · {e(r['name'] or 'Бег')}</b><br>{opts}<br>"
+                 "<input name=note placeholder='комментарий (необязательно)' maxlength=200 style='width:60%;padding:6px'> "
+                 "<button>Сохранить</button></form>")
+    return h
+
+
+def body_html(con, msg=None):
+    """Ввод веса и замеров лентой, напоминание о замерах. msg — (ok, текст) после неудачной отправки формы."""
+    e = html.escape
+    today = timeutil.today()
+    h = ["<h2>Вес и замеры</h2>"]
+    if msg:
+        h.append(f"<div class={'note' if msg[0] else 'err'}>{e(msg[1])}</div>")
+    due, last, passed, iv = body.measure_status(con, today)
+    if due:
+        when = "ещё ни разу не делали" if last is None else f"последние {e(last)}, прошло {passed} дн."
+        h.append(f"<div class=warn><b>Пора делать замеры лентой</b> ({when}; интервал {iv} дн.). Форма ниже.</div>")
+    else:
+        h.append(f"<p><small>Замеры лентой: последние {e(last)}, следующие через {iv - passed} дн.</small></p>")
+    now = timeutil.now()[:16].replace(" ", "T")
+    fields = "".join(f"<label>{e(lbl)}<input name={k} inputmode=decimal{' required' if req else ''}></label>"
+                     for k, (lbl, lo, hi, req) in body.WEIGHT_FIELDS.items())
+    h.append("<h3>Взвешивание</h3><form method=post action=weight class=f>"
+             f"<label>Дата и время<input type=datetime-local name=at value='{now}' style='width:200px'></label>{fields}"
+             "<label>Заметка<input name=note maxlength=200 style='width:180px'></label><button>Записать вес</button></form>"
+             "<p><small>Утром, натощак, после туалета, в одинаковых условиях. Жир и вода — с весов (биоимпеданс), их можно не заполнять. "
+             "Жировая и безжировая масса считаются сами.</small></p>")
+    rows = con.execute("SELECT * FROM body_weight ORDER BY at DESC, id DESC LIMIT 8").fetchall()
+    if rows:
+        h.append("<table><tr><th>Когда</th><th>Вес, кг</th><th>Жир, %</th><th>Вода, %</th><th>Кости, кг</th><th>Висц.</th><th>Заметка</th><th></th></tr>")
+        v = lambda x: "" if x is None else f"{x:g}"
+        for r in rows:
+            h.append(f"<tr><td>{e(r['at'][:16])}</td><td>{v(r['weight_kg'])}</td><td>{v(r['fat_pct'])}</td><td>{v(r['water_pct'])}</td>"
+                     f"<td>{v(r['bone_kg'])}</td><td>{v(r['visceral'])}</td><td>{e(r['note'] or '')}</td>"
+                     f"<td><form method=post action=weight_del><input type=hidden name=id value={r['id']}><button>Удалить</button></form></td></tr>")
+        h.append("</table>")
+    mf = "".join(f"<label title='{e(how)}'>{e(lbl)}<input name={k} inputmode=decimal></label>" for k, (lbl, how) in body.MEASURES.items())
+    h.append("<h3>Замеры лентой, см</h3><form method=post action=measure class=f>"
+             f"<label>Дата<input type=date name=day value='{today.isoformat()}' style='width:160px'></label>{mf}"
+             "<button>Записать замеры</button></form>")
+    h.append("<details><summary>Как мерить</summary><ul>" + "".join(f"<li><b>{e(lbl)}</b>: {e(how)}</li>" for lbl, how in body.MEASURES.values()) +
+             "</ul><p><small>Утром, натощак, после туалета, расслабленно, на выдохе. Лента плотно прилегает, но не врезается, параллельно полу. "
+             "Каждый замер — дважды, записывай среднее. Мерь всегда в тех же точках и (для рук и ног) с той же стороны. "
+             "Достаточно заполнить часть полей; повторная запись за ту же дату дополняет и обновляет значения. "
+             "Полные замеры раз в 4 недели, талию можно мерить чаще (раз в неделю).</small></p></details>")
+    ms = con.execute("SELECT * FROM body_measure ORDER BY date DESC LIMIT 4").fetchall()
+    if ms:
+        h.append("<table><tr><th>Замер</th>" + "".join(f"<th>{e(r['date'])}</th>" for r in ms) + "</tr>")
+        for k, (lbl, _) in body.MEASURES.items():
+            if all(r[k] is None for r in ms):
+                continue
+            h.append(f"<tr><td>{e(lbl)}</td>" + "".join(f"<td>{'' if r[k] is None else f'{r[k]:g}'}</td>" for r in ms) + "</tr>")
+        h.append("<tr><td></td>" + "".join(
+            f"<td><form method=post action=measure_del><input type=hidden name=day value={e(r['date'])}><button>Удалить</button></form></td>" for r in ms) + "</tr></table>")
+    return h
+
+
+def page(con, cfg, notice=None, editor_text=None, report_text=None, body_msg=None):
     e = html.escape
     runs = con.execute("SELECT * FROM sync_run ORDER BY id DESC LIMIT 8").fetchall()
     h = [f"<h1>Тренировочный центр</h1><form method=post action=sync><button>Синхронизировать с Garmin</button></form>"]
     h += traffic_html(con)
+    h += feel_html(con)
     h += plan_html(con)
     h += program_html(con, notice, editor_text)
+    h += body_html(con, body_msg)
     h += report_html(con, cfg, report_text, None)
     h += [
          "<h2>Синхронизации</h2><table><tr><th>Начало</th><th>Запуск</th><th>Итог</th><th>Дней</th><th>Тренировок</th><th>Подходов</th><th>Ошибки</th></tr>"]
@@ -321,6 +390,27 @@ def serve(con, cfg, start_sync, port=8099):
                     ok, msg = report.push(text)
                     notice = (f"<b>{'Отправлено' if ok else 'Не отправлено'}:</b> {html.escape(msg)}")
                 return self._send(200, page(con, cfg, notice=notice, report_text=text).encode())
+            elif path.endswith("weight"):
+                f = {k: (v[0] if v else "") for k, v in form.items()}
+                ok, text = body.add_weight(con, f.get("at"), f)
+                if not ok:
+                    return self._send(200, page(con, cfg, body_msg=(ok, text)).encode())
+            elif path.endswith("weight_del"):
+                v = (form.get("id") or [""])[0]
+                if v.isdigit():
+                    body.delete_weight(con, int(v))
+            elif path.endswith("measure"):
+                f = {k: (v[0] if v else "") for k, v in form.items()}
+                ok, text = body.add_measures(con, f.get("day"), f)
+                if not ok:
+                    return self._send(200, page(con, cfg, body_msg=(ok, text)).encode())
+            elif path.endswith("measure_del"):
+                body.delete_measures(con, (form.get("day") or [""])[0])
+            elif path.endswith("run_feel"):
+                f = {k: (v[0] if v else "") for k, v in form.items()}
+                ok, text = body.set_feel(con, f.get("id"), f.get("score"), f.get("note"))
+                if not ok:
+                    return self._send(200, page(con, cfg, body_msg=(ok, text)).encode())
             elif path.endswith("rollback"):
                 v = (form.get("id") or [""])[0]
                 if v.isdigit():

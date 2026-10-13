@@ -1,7 +1,7 @@
 import sys, pathlib, tempfile, json, datetime, urllib.error
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "training_center"))
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent))
-from app import program, report, settings as stg
+from app import program, report, body, progress, settings as stg
 import test_program as tp
 
 stg.FILE = pathlib.Path(tempfile.mkdtemp()) / "settings.json"
@@ -29,6 +29,45 @@ def test_build_has_all_blocks():
         assert s in t, s
     assert "90×8, 95×8, 95×8" in t and "свой вес×7, свой вес×7" in t
     assert "token" not in t.lower()
+
+
+def test_weight_measures_feel_and_notes():
+    con, act = tp.mkdb()
+    act(3, "2026-10-05", "Full Body A", [("BARBELL_BACK_SQUAT", 8, 85)] * 3 + [("DUMBBELL_BICEPS_CURL", 10, 10)])
+    d, _ = program.build_draft(con)
+    d["evaluate_from"] = "2026-10-12"
+    program.save_version(con, program.dump(d), "ручная", "т", True)
+    progress.apply_all(con)
+    con.execute("INSERT INTO activity VALUES(9,'2026-10-11 08:00:00','running','Бег','%s')" % json.dumps({"distance": 5200, "duration": 1900}))
+    con.execute("INSERT INTO activity VALUES(10,'2026-10-09 08:00:00','running','Бег','{}')")
+    con.commit()
+    t = report.build(con, today=TODAY)
+    # силовые: пометки
+    assert "| 90×8, 95×8, 95×8 | вес ↑ 85→95 кг; верх диапазона на всех подходах, прибавка → 95/95/95 кг |" in t, t
+    assert "до верха диапазона (10) не дотянул: 9" in t
+    assert "| Подтягивания" in t or "свой вес×7" in t
+    # вес: пока нет записей
+    assert "## Вес тела" in t and "| | нет записей |" in t and "За период нет записей веса тела" in t
+    assert "Замеров лентой ещё нет." in t and "Полных замеров лентой ещё не было" in t
+    assert "| 10-11 | 5,2 | 6:05 | — | — | не отмечено |" in t and "Бег 10-11: не отмечено, как ощущался" in t
+    # теперь данные
+    for at, w, f in (("2026-10-13 07:30", "86,85", "21,2"), ("2026-10-12 07:30", "85,05", "20"), ("2026-10-06 07:30", "85", ""),
+                     ("2026-09-20 07:30", "84", "")):
+        assert body.add_weight(con, at, {"weight_kg": w, "fat_pct": f}, TODAY)[0]
+    body.add_measures(con, "2026-09-15", {"waist": "91", "chest": "104"}, TODAY)
+    body.add_measures(con, "2026-10-10", {"waist": "90,5", "chest": "104,5", "arm": "36"}, TODAY)
+    body.set_feel(con, 9, 4, "ноги лёгкие")
+    t = report.build(con, today=TODAY)
+    assert "| 10-13 07:30 | 86,85 | 21,2 | 18,4 | 68,4 | — | manual |" in t, t
+    assert "| 10-06 07:30 | 85 | — | — | — | — | manual |" in t
+    assert "09-20" not in t.split("## Вес тела")[1].split("## Замеры")[0].split("Среднее")[0]    # старше 14 дней в таблицу не идёт
+    assert "Среднее за 7 дней: 85,9 кг (жир 20,6%, безжировая 68,2 кг), дней с записью: 2." in t, t
+    assert "Среднее за 28 дней: 85,2 кг, дней с записью: 4; сдвиг недели к 28 дням: +0,7 кг." in t, t
+    assert "| Замер | 09-15 | 10-10 | Δ к предыдущим |" in t and "| Талия | 91 | 90,5 | -0,5 |" in t, t
+    assert "| Бицепс (правый) | — | 36 | |" in t
+    assert "| 10-11 | 5,2 | 6:05 | — | — | 4/5 — легко; ноги лёгкие |" in t
+    assert "Бег 10-09: не отмечено, как ощущался" in t
+    assert "Пора делать замеры" not in t and "За период нет записей веса" not in t
 
 
 def test_hide_blocks():

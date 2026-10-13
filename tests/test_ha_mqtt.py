@@ -29,7 +29,7 @@ def fresh():
 def test_discovery():
     cfgs = {t: json.loads(p) for t, p in ha_mqtt.build_discovery()}
     ids = sorted(c["default_entity_id"] for c in cfgs.values())
-    assert ids == ["binary_sensor.training_garmin_ok", "event.training_workout_done", "sensor.training_last_sync",
+    assert ids == ["binary_sensor.training_garmin_ok", "binary_sensor.training_measure_due", "event.training_workout_done", "sensor.training_last_sync",
                    "sensor.training_today_session", "sensor.training_traffic_light", "sensor.training_week_done"]
     c = cfgs["homeassistant/sensor/training_center/training_traffic_light/config"]
     assert c["state_topic"] == "training_center/training_traffic_light/state"
@@ -56,6 +56,17 @@ def test_states():
     con.execute("DELETE FROM daily_raw")
     s3 = ha_mqtt.build_states(con, SLOTS, TODAY)
     assert s3["training_traffic_light"][0] == "нет данных"
+
+
+def test_measure_due_sensor():
+    con = fresh()
+    s = ha_mqtt.build_states(con, SLOTS, TODAY)["binary:training_measure_due"]
+    assert s[0] == "ON" and s[1]["последние_замеры"] is None
+    con.execute("INSERT INTO body_measure(date,waist) VALUES('2026-10-01',90)")
+    s = ha_mqtt.build_states(con, SLOTS, TODAY)["binary:training_measure_due"]
+    assert s[0] == "OFF" and s[1]["дней_прошло"] == 13 and s[1]["интервал_дней"] == 28
+    con.execute("UPDATE body_measure SET date='2026-09-10'")
+    assert ha_mqtt.build_states(con, SLOTS, TODAY)["binary:training_measure_due"][0] == "ON"
 
 
 def test_garmin_ok_false_on_failed_sync():
@@ -98,7 +109,7 @@ def test_bridge_publish_and_dedup():
     b = ha_mqtt.Bridge(lambda: db.connect(path), lambda c: SLOTS, client=fc)
     b.publish_all()
     topics = [t for t, p, r in fc.sent]
-    assert ha_mqtt.AVAIL in topics and sum(t.endswith("/config") for t in topics) == 6
+    assert ha_mqtt.AVAIL in topics and sum(t.endswith("/config") for t in topics) == 7
     assert all(r for t, p, r in fc.sent)                              # всё с retain
     n = len(fc.sent)
     assert b.publish_states() == 0 and len(fc.sent) == n              # без изменений ничего не шлём

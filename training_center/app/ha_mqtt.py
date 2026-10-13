@@ -7,7 +7,7 @@ import json, os, threading, time, urllib.request
 from datetime import datetime, timedelta
 from pathlib import Path
 
-from . import plan, timeutil, traffic, settings as stg
+from . import body, plan, timeutil, traffic, settings as stg
 
 PREFIX = "training_center"
 AVAIL = f"{PREFIX}/status"
@@ -38,6 +38,8 @@ def entities():
                                            "icon": "mdi:sync", "json_attributes": True}),
         ("binary_sensor", "training_garmin_ok", {"name": "Garmin: вход работает", "device_class": "connectivity",
                                                   "payload_on": "ON", "payload_off": "OFF", "json_attributes": True}),
+        ("binary_sensor", "training_measure_due", {"name": "Пора делать замеры лентой", "icon": "mdi:tape-measure",
+                                                    "payload_on": "ON", "payload_off": "OFF", "json_attributes": True}),
         ("event", "training_workout_done", {"name": "Тренировка выполнена", "icon": "mdi:check-circle-outline",
                                              "event_types": [EVENT_TYPE]}),
     ]
@@ -134,6 +136,11 @@ def sync_states(con):
     return ts, "ON" if r["ok"] else "OFF", attrs
 
 
+def measure_state(con, today):
+    due, last, days, iv = body.measure_status(con, today)
+    return "ON" if due else "OFF", {"последние_замеры": last, "дней_прошло": days, "интервал_дней": iv}
+
+
 def build_states(con, slots, today=None):
     """-> {ключ: (состояние, атрибуты)} для всех сенсоров."""
     today = today or timeutil.today()
@@ -143,7 +150,8 @@ def build_states(con, slots, today=None):
            "training_today_session": session_state(cells, today),
            "training_week_done": week_state(cells, ok, today),
            "training_last_sync": (ts, sattrs),
-           "binary:training_garmin_ok": (garmin_ok, sattrs)}
+           "binary:training_garmin_ok": (garmin_ok, sattrs),
+           "binary:training_measure_due": measure_state(con, today)}
     return out
 
 

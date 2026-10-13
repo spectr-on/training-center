@@ -35,6 +35,15 @@ MIGRATIONS = [
     """
     CREATE TABLE mqtt_event(activity_id INTEGER PRIMARY KEY, at TEXT);
     """,
+    # 7: вес тела, замеры лентой, ощущения после бега (ввод вручную)
+    """
+    CREATE TABLE body_weight(id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT NOT NULL, weight_kg REAL NOT NULL,
+        fat_pct REAL, water_pct REAL, bone_kg REAL, visceral REAL, source TEXT NOT NULL DEFAULT 'manual', note TEXT);
+    CREATE INDEX body_weight_at ON body_weight(at);
+    CREATE TABLE body_measure(date TEXT PRIMARY KEY, neck REAL, shoulders REAL, chest REAL, waist REAL, hips REAL,
+        arm REAL, thigh REAL, calf REAL, note TEXT);
+    CREATE TABLE run_feel(activity_id INTEGER PRIMARY KEY, score INTEGER NOT NULL, note TEXT, at TEXT);
+    """,
 ]
 
 

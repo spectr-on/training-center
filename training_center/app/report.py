@@ -4,7 +4,7 @@ import urllib.request, urllib.error
 from datetime import date, timedelta
 from pathlib import Path
 
-from . import traffic, program, plan, timeutil, settings as stg
+from . import traffic, program, plan, timeutil, body, settings as stg
 from .exercise_names import ru
 from .lifestyle import parse_day
 
@@ -19,6 +19,11 @@ BLOCKS = {"traffic": "Светофор", "recovery": "Восстановлени
 def n(v):
     """Число по-русски: 92,5."""
     return f"{v:g}".replace(".", ",")
+
+
+def sg(v):
+    """Число со знаком по-русски: +1,3."""
+    return f"{v:+g}".replace(".", ",")
 
 
 def _sets_text(sets):
@@ -67,6 +72,107 @@ def _strength(con, start, end, div):
     return out
 
 
+def _plan_info(pdata):
+    """код упражнения -> (верх диапазона повторов, число плановых подходов) по активной программе."""
+    out = {}
+    for s in (pdata or {}).get("sessions", []):
+        if s.get("kind") != "strength":
+            continue
+        for b in s.get("blocks", []):
+            for x in b["exercises"]:
+                out.setdefault(x["code"], (x["reps"][1], len(x["weights"])))
+    return out
+
+
+def _sets_of(con, activity_id, ex, div):
+    return [(r["reps"] or 0, (r["weight_raw"] or 0) / div) for r in con.execute(
+        "SELECT reps,weight_raw FROM workout_set WHERE activity_id=? AND set_type='ACTIVE' AND exercise=? ORDER BY idx",
+        (activity_id, ex))]
+
+
+def _exercise_notes(con, act, ex, sets, info, div):
+    """Пометки к упражнению: сравнение с прошлой тренировкой, верх диапазона, прибавка."""
+    notes = []
+    prev = con.execute(
+        "SELECT a.id FROM activity a WHERE a.type_key='strength_training' AND a.start_local<? AND EXISTS "
+        "(SELECT 1 FROM workout_set w WHERE w.activity_id=a.id AND w.set_type='ACTIVE' AND w.exercise=?) "
+        "ORDER BY a.start_local DESC LIMIT 1", (act["start_local"], ex)).fetchone()
+    kg, reps = max(k for _, k in sets), sum(r for r, _ in sets)
+    if not prev:
+        notes.append("раньше в базе не было")
+    else:
+        ps = _sets_of(con, prev["id"], ex, div)
+        pk, pr = max(k for _, k in ps), sum(r for r, _ in ps)
+        if kg > pk + 1e-9:
+            notes.append(f"вес ↑ {n(pk)}→{n(kg)} кг")
+        elif kg < pk - 1e-9:
+            notes.append(f"вес ↓ {n(pk)}→{n(kg)} кг")
+        elif reps > pr:
+            notes.append(f"повторов +{reps - pr}")
+        elif reps < pr:
+            notes.append(f"повторов −{pr - reps}")
+        else:
+            notes.append("как в прошлый раз")
+    if ex in info:
+        top, cnt = info[ex]
+        short = [r for r, _ in sets[-cnt:] if r < top]
+        if short:
+            notes.append(f"до верха диапазона ({top}) не дотянул: {', '.join(str(r) for r in short)}")
+    log = con.execute("SELECT text FROM progress_log WHERE activity_id=? AND code=?", (act["id"], ex)).fetchone()
+    if log:
+        notes.append("верх диапазона на всех подходах, прибавка → " + log["text"].split("→")[-1].strip() + " кг")
+    return "; ".join(notes)
+
+
+def _weight_block(con, today, days):
+    """Вес тела: записи по дням за период (не меньше 14 дней) и средние."""
+    start = today - timedelta(days=max(days, 14) - 1)
+    rows = body.weights_between(con, start, today)
+    L = ["## Вес тела", "| Дата | Вес, кг | Жир, % | Жир, кг | Безжировая, кг | Вода, % | Источник |",
+         "|---|---|---|---|---|---|---|"]
+    f = lambda v: "—" if v is None else n(v)
+    for r in rows:
+        L.append(f"| {r['at'][5:16]} | {n(r['weight_kg'])} | {f(r['fat_pct'])} | {f(r['fat_kg'])} | {f(r['lean_kg'])} | "
+                 f"{f(r['water_pct'])} | {r['source']} |")
+    if not rows:
+        L.append("| | нет записей | | | | | |")
+    a7, a28 = body.window_avg(con, today, 7), body.window_avg(con, today, 28)
+    if a7:
+        extra = ", ".join(x for x in (f"жир {n(round(a7['fat_pct'], 1))}%" if a7["fat_pct"] is not None else "",
+                                       f"безжировая {n(round(a7['lean_kg'], 1))} кг" if a7["lean_kg"] is not None else "") if x)
+        line = f"Среднее за 7 дней: {n(round(a7['weight'], 1))} кг" + (f" ({extra})" if extra else "") + f", дней с записью: {a7['days']}."
+        if a28 and a28["days"] > a7["days"]:
+            line += (f" Среднее за 28 дней: {n(round(a28['weight'], 1))} кг, дней с записью: {a28['days']}; "
+                     f"сдвиг недели к 28 дням: {sg(round(a7['weight'] - a28['weight'], 1))} кг.")
+        L += ["", line]
+    elif rows:
+        L += ["", "За последние 7 дней записей веса нет."]
+    if rows:
+        L += ["Жир и вода — по биоимпедансу, единичное значение шумит на 1–2 кг и 1–2 п.п.: ориентируйся на средние."]
+    L.append("")
+    return L
+
+
+def _measure_block(con):
+    L = ["## Замеры лентой, см"]
+    sets = body.last_measures(con, 3)
+    if not sets:
+        return L + ["Замеров лентой ещё нет.", ""]
+    L += ["| Замер | " + " | ".join(s["date"][5:] for s in sets) + (" | Δ к предыдущим |" if len(sets) > 1 else " |"),
+          "|---|" + "---|" * len(sets) + ("---|" if len(sets) > 1 else "")]
+    for key, (label, _) in body.MEASURES.items():
+        vals = [s[key] for s in sets]
+        if all(v is None for v in vals):
+            continue
+        row = f"| {label} | " + " | ".join("—" if v is None else n(v) for v in vals) + " |"
+        if len(sets) > 1:
+            a, b = vals[-1], vals[-2]
+            row += ("" if a is None or b is None else " " + sg(round(a - b, 1))) + " |"
+        L.append(row)
+    L.append("")
+    return L
+
+
 def build(con, today=None, days=7, div=1000.0, hide=()):
     """Markdown-отчёт за последние days дней (включая сегодня)."""
     today = today or timeutil.today()
@@ -91,6 +197,7 @@ def build(con, today=None, days=7, div=1000.0, hide=()):
 
     L.append("## План и факт")
     strength = _strength(con, start, today, div)
+    info = _plan_info(pdata)
     if not strength:
         L += ["Силовых тренировок за период нет.", ""]
     for a, order, per in strength:
@@ -100,7 +207,7 @@ def build(con, today=None, days=7, div=1000.0, hide=()):
             mark = ru(ex)
             if mark.endswith("⁇"):
                 notes.append(f"Упражнение без русского названия: {ex}")
-            L.append(f"| {mark} | {_sets_text(per[ex])} | |")
+            L.append(f"| {mark} | {_sets_text(per[ex])} | {_exercise_notes(con, a, ex, per[ex], info, div)} |")
         L.append("")
     # слоты недель без выполнения
     week = []
@@ -133,7 +240,7 @@ def build(con, today=None, days=7, div=1000.0, hide=()):
                     L.append(f"| {ru(x['code'])} | {wt} | {x['reps'][0]}–{x['reps'][1]} | {why} |")
             L.append("")
 
-    L += ["## Бег", "| Дата | Км | Темп | Пульс | Нагрузка |", "|---|---|---|---|---|"]
+    L += ["## Бег", "| Дата | Км | Темп | Пульс | Нагрузка | Как ощущался |", "|---|---|---|---|---|---|"]
     runs = con.execute("SELECT * FROM activity WHERE type_key IN ('running','treadmill_running','trail_running') "
                        "AND substr(start_local,1,10)>=? ORDER BY start_local", (start.isoformat(),)).fetchall()
     for r in runs:
@@ -142,10 +249,17 @@ def build(con, today=None, days=7, div=1000.0, hide=()):
         pace = f"{int(sec / km // 60)}:{int(sec / km % 60):02d}" if km else "—"
         hr = j.get("averageHR")
         te = j.get("aerobicTrainingEffect")
+        fl = body.feel_of(con, r["id"])
+        feel = "не отмечено" if fl is None else f"{fl[0]}/5 — {body.FEEL[fl[0]]}" + (f"; {fl[1]}" if fl[1] else "")
+        if fl is None:
+            notes.append(f"Бег {r['start_local'][5:10]}: не отмечено, как ощущался")
         L.append(f"| {r['start_local'][5:10]} | {n(round(km, 2))} | {pace} | {'—' if hr is None else round(hr)} | "
-                 f"{'—' if te is None else 'аэробный эффект ' + n(round(te, 1))} |")
+                 f"{'—' if te is None else 'аэробный эффект ' + n(round(te, 1))} | {feel} |")
     if not runs:
-        L.append("| | | | | за период бега нет |")
+        L.append("| | | | | за период бега нет | |")
+    else:
+        L.append("")
+        L.append("Как ощущался: 1 — очень тяжело, 3 — нормально, 5 — очень легко.")
     L.append("")
 
     if "recovery" not in hide:
@@ -159,6 +273,15 @@ def build(con, today=None, days=7, div=1000.0, hide=()):
         if L[-1].startswith("|---"):
             L.append("| | нет данных | | | |")
         L.append("")
+
+    L += _weight_block(con, today, days)
+    L += _measure_block(con)
+    if not body.weights_between(con, start, today):
+        notes.append("За период нет записей веса тела")
+    due, last, passed, iv = body.measure_status(con, today)
+    if due:
+        notes.append("Полных замеров лентой ещё не было" if last is None else
+                     f"Пора делать замеры лентой: последние {last}, прошло {passed} дн. (интервал {iv} дн.)")
 
     for d in _days(start, today):
         fac = _daily_lifestyle(con, d.isoformat())
