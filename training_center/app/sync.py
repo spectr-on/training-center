@@ -3,6 +3,8 @@ import json, time, threading
 from datetime import date, datetime, timedelta
 from pathlib import Path
 
+from . import timeutil
+
 PAUSE = 0.5
 DAILY = [("stats", "get_stats"), ("sleep", "get_sleep_data"), ("hrv", "get_hrv_data"),
          ("readiness", "get_training_readiness"), ("lifestyle", "get_lifestyle_logging_data")]
@@ -10,7 +12,7 @@ lock = threading.Lock()
 
 
 def now():
-    return datetime.now().isoformat(timespec="seconds")
+    return timeutil.now()
 
 
 def login(token_dir):
@@ -44,7 +46,7 @@ def run_sync(con, api_factory, days, trigger="кнопка"):
     con.commit()
     try:
         api = api_factory()
-        today = date.today()
+        today = timeutil.today()
         for back in range(days):
             d = (today - timedelta(days=back)).isoformat()
             for kind, method in DAILY:

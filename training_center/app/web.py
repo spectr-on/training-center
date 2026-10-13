@@ -2,7 +2,7 @@
 import html, threading
 from .blocks import group_blocks
 from .exercise_names import ru, overrides_status
-from . import traffic, plan, program, sync, garmin_workout as gw, settings as stg
+from . import traffic, plan, program, sync, timeutil, garmin_workout as gw, settings as stg
 from datetime import date, timedelta
 import json as _json
 from urllib.parse import parse_qs, urlparse
@@ -58,11 +58,17 @@ TL_NAME = {"green": "🟢 Зелёный", "yellow": "🟡 Жёлтый", "red":
 
 def traffic_html(con):
     e = html.escape
-    today = date.today()
+    today = timeutil.today()
     d = today.isoformat()
     m = traffic.metrics(con, d)
     if all(m[k] is None for k in ("readiness", "sleep_h", "hrv", "rhr", "bb")):
         return [f"<h2>Светофор</h2><p>За {d} данных пока нет. Нажми «Синхронизировать с Garmin».</p>"]
+    wait = traffic.missing_morning(m)
+    if wait:
+        return [f"<h2>Светофор на {d}</h2><div class='tl grey'><b>⚪ Утренних данных ещё нет</b><br>"
+                f"Garmin пока не обработал: {e(', '.join(wait))}. Цвет без них не показываю, чтобы не ошибиться.<br>"
+                "<small>Открой приложение Garmin Connect на телефоне, дождись синхронизации часов и нажми «Синхронизировать с Garmin». "
+                "Утром аддон также сам повторяет синхронизацию каждые 15 минут, пока данные не появятся.</small></div>"]
     color, why, notes = traffic.decide(m)
     f = lambda v, u="": "—" if v is None else f"{v}{u}"
     rn = "" if m["readiness_now"] in (None, m["readiness"]) else f", последнее обновление Garmin {m['readiness_now']} ({m['readiness_now_at']})"
@@ -100,7 +106,7 @@ def plan_html(con):
     e = html.escape
     slots = current_slots(con)
     cfg = {"slots": slots}
-    today = date.today()
+    today = timeutil.today()
     mon = plan.monday(today)
     dn = lambda d: "любой день" if d is None else DAYS[d]
     h = ["<h2>Недельный план</h2><table><tr><th>Неделя</th>" + "".join(f"<th>{e(s['label'])}<br><small>план: {dn(s['day'])}</small></th>" for s in slots) + "<th>Неделя</th></tr>"]
@@ -213,7 +219,7 @@ def serve(con, cfg, start_sync, port=8099):
         def do_GET(self):
             u = urlparse(self.path)
             if u.path.rstrip("/").endswith("raw"):
-                d = (parse_qs(u.query).get("date") or [date.today().isoformat()])[0]
+                d = (parse_qs(u.query).get("date") or [timeutil.today().isoformat()])[0]
                 rows = {r["kind"]: _json.loads(r["json"]) for r in con.execute("SELECT kind,json FROM daily_raw WHERE date=?", (d,))}
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")

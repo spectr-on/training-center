@@ -24,7 +24,22 @@ MIGRATIONS = [
     """
     CREATE TABLE garmin_workout(session_key TEXT PRIMARY KEY, workout_id INTEGER, name TEXT, updated_at TEXT);
     """,
+    # 4: метки времени, записанные раньше в UTC с буквой T, переводим в местное время
+    "PY:times",
 ]
+
+
+def _migrate_times(con):
+    from . import timeutil
+    for table, cols in (("sync_run", ("started_at", "finished_at")), ("program_version", ("created_at",)),
+                        ("progress_log", ("at",)), ("garmin_workout", ("updated_at",)), ("daily_raw", ("fetched_at",))):
+        for col in cols:
+            for r in con.execute(f"SELECT rowid AS rid, {col} AS v FROM {table} WHERE {col} LIKE '____-__-__T%'").fetchall():
+                try:
+                    new = timeutil.utc_iso_to_local(r["v"])
+                except Exception:
+                    continue
+                con.execute(f"UPDATE {table} SET {col}=? WHERE rowid=?", (new, r["rid"]))
 
 
 def connect(path):
@@ -37,7 +52,10 @@ def connect(path):
         if cur > 0 and path.exists():
             shutil.copy(path, f"{path}.bak-v{cur}")
         for i in range(cur, len(MIGRATIONS)):
-            con.executescript(MIGRATIONS[i])
+            if MIGRATIONS[i] == "PY:times":
+                _migrate_times(con)
+            else:
+                con.executescript(MIGRATIONS[i])
             con.execute(f"PRAGMA user_version={i + 1}")
         con.commit()
     return con

@@ -4,6 +4,7 @@ from datetime import date, datetime
 
 import yaml
 
+from . import timeutil
 from .blocks import group_blocks
 from . import garmin_workout as gw
 
@@ -11,7 +12,7 @@ STEP_DEFAULT = {"barbell": 5, "dumbbell": 2.5}
 
 
 def now():
-    return datetime.now().isoformat(timespec="seconds")
+    return timeutil.now()
 
 
 def equipment_of(code, weights):
@@ -152,7 +153,7 @@ def rollback(con, version_id):
 # ---------- черновик из Garmin ----------
 def build_draft(con, divisor=1000.0):
     data = {"program": "Full Body",
-            "evaluate_from": date.today().isoformat(),
+            "evaluate_from": timeutil.today().isoformat(),
             "progression": {"rule": "волна с последнего подхода", "step_kg": dict(STEP_DEFAULT)},
             "sessions": []}
     missing = []

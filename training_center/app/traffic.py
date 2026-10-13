@@ -64,6 +64,17 @@ def metrics(con, d):
     return m
 
 
+def missing_morning(m):
+    """Чего не хватает, чтобы вообще принимать решение: сон и утренний Readiness.
+    Пока Garmin не обработал ночь (часы ещё не синхронизировались с телефоном), цвет показывать нельзя."""
+    out = []
+    if m.get("sleep_h") is None:
+        out.append("сон")
+    if m.get("readiness") is None:
+        out.append("утренний Training Readiness")
+    return out
+
+
 def decide(m):
     """-> (цвет, [причины], [заметки о нехватке данных])"""
     flags, notes = [], []

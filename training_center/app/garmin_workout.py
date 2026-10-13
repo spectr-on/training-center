@@ -3,6 +3,7 @@ import json
 import statistics
 from datetime import datetime
 
+from . import timeutil
 from .exercise_names import ru
 from .garmin_weights import weight_fields
 
@@ -182,6 +183,6 @@ def send(api, con, session, cats):
         if not wid:
             raise WorkoutError(f"Garmin не вернул номер тренировки: {str(res)[:200]}")
     con.execute("INSERT OR REPLACE INTO garmin_workout VALUES(?,?,?,?)",
-                (session["key"], wid, payload["workoutName"], datetime.now().isoformat(timespec="seconds")))
+                (session["key"], wid, payload["workoutName"], timeutil.now()))
     con.commit()
     return wid, mode

@@ -1,11 +1,20 @@
 import threading, time
-from . import db, sync, web, progress
+from . import timeutil, db, sync, web, progress, traffic
 
 CFG = {"weight_divisor": 1000.0, "token_dir": "/config/garmin", "db": "/data/training.db",
        "auto_hours": 3, "days_first": 30, "days_regular": 3}
 
 
+def morning_incomplete(c):
+    """Утро (5-12 ч) и по сегодняшнему дню ещё нет сна/Readiness -> стоит повторить синхронизацию."""
+    now = timeutil.now_dt()
+    if not 5 <= now.hour < 12:
+        return False
+    return bool(traffic.missing_morning(traffic.metrics(c, now.date().isoformat())))
+
+
 def main():
+    print("Часовой пояс:", timeutil.setup(), timeutil.now(), flush=True)
     con = db.connect(CFG["db"])
     first = con.execute("SELECT COUNT(*) FROM sync_run WHERE ok=1").fetchone()[0] == 0
 
@@ -24,7 +33,11 @@ def main():
     def loop():
         start_sync("при запуске")
         while True:
-            time.sleep(CFG["auto_hours"] * 3600)
+            try:
+                wait = 900 if morning_incomplete(db.connect(CFG["db"])) else CFG["auto_hours"] * 3600
+            except Exception:
+                wait = CFG["auto_hours"] * 3600
+            time.sleep(wait)
             start_sync("авто")
     threading.Thread(target=loop, daemon=True).start()
     web.serve(con, CFG, start_sync)

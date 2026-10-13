@@ -2,7 +2,7 @@
 import copy
 from datetime import datetime
 
-from . import program
+from . import program, timeutil
 
 
 def next_weights(weights, top_reps, actual, step):
@@ -61,9 +61,9 @@ def apply_all(con, divisor=1000.0):
                         changed = True
                         events.append(text)
                         con.execute("INSERT OR REPLACE INTO progress_log VALUES(?,?,?,?)",
-                                    (a["id"], ex["code"], datetime.now().isoformat(timespec="seconds"), text))
+                                    (a["id"], ex["code"], timeutil.now(), text))
         con.execute("INSERT OR REPLACE INTO progress_log VALUES(?,?,?,?)",
-                    (a["id"], "*", datetime.now().isoformat(timespec="seconds"),
+                    (a["id"], "*", timeutil.now(),
                      "обработана" if sess is not None else "не относится к программе"))
     if changed:
         program.save_version(con, program.dump(data), "авто", "; ".join(events)[:300], True)
