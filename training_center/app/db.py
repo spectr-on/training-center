@@ -26,6 +26,11 @@ MIGRATIONS = [
     """,
     # 4: метки времени, записанные раньше в UTC с буквой T, переводим в местное время
     "PY:times",
+    # 5: слепок отправленной тренировки и журнал отправок в Garmin
+    """
+    ALTER TABLE garmin_workout ADD COLUMN payload_hash TEXT;
+    CREATE TABLE push_log(id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, session_key TEXT, why TEXT, ok INTEGER, text TEXT);
+    """,
 ]
 
 

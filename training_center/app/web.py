@@ -166,6 +166,17 @@ def program_html(con, notice=None, editor_text=None):
                  "<button>Проверить и сохранить новой версией</button></form>"
                  "<p><small>Вес в Garmin уходит по верхней границе диапазона повторов; диапазон хранится здесь как справка и для прибавки веса. "
                  "weights — вес по подходам (кг), 0 — свой вес. day: 0 (пн) … 6 (вс) или без day — любой день.</small></p></details>")
+    on = bool(stg.get("push_to_device", False))
+    h.append("<h3>Отправка в Garmin</h3><p><small>Если тренировка уже отправлялась, после каждой синхронизации система сверяет её с программой "
+             "и сама обновляет в Garmin при расхождении (например, после прибавки веса).</small></p>"
+             f"<form method=post action=push_toggle><input type=hidden name=on value={0 if on else 1}>"
+             f"<button>{'Выключить' if on else 'Включить'} автоматическую отправку на часы</button> "
+             f"<small>сейчас: {'включена' if on else 'выключена'} (экспериментально: метод библиотеки не проверен на твоих часах)</small></form>")
+    plog = con.execute("SELECT * FROM push_log ORDER BY id DESC LIMIT 6").fetchall()
+    if plog:
+        h.append("<table><tr><th>Когда</th><th>Тренировка</th><th>Повод</th><th>Итог</th></tr>" + "".join(
+            f"<tr><td>{e(r['at'])}</td><td>{e(r['session_key'])}</td><td>{e(r['why'] or '')}</td>"
+            f"<td>{'<span class=ok>ок</span>' if r['ok'] else '<span class=bad>сбой</span>'} {e(r['text'] or '')}</td></tr>" for r in plog) + "</table>")
     vers = con.execute("SELECT * FROM program_version ORDER BY id DESC LIMIT 8").fetchall()
     if vers:
         h.append("<details><summary>Версии программы</summary><table><tr><th>№</th><th>Когда</th><th>Вид</th><th>Что изменилось</th><th></th></tr>")
@@ -261,13 +272,16 @@ def serve(con, cfg, start_sync, port=8099):
                     return self._send(200, page(con, cfg, notice="Тренировка не найдена в активной программе.").encode())
                 try:
                     api = (cfg.get("api_factory") or (lambda: sync.login(cfg["token_dir"])))()
-                    wid, mode = gw.send(api, con, sess, gw.category_map(con))
+                    dev = bool(stg.get("push_to_device", False))
+                    wid, text = gw.push_session(con, api, sess, gw.category_map(con), "вручную", dev)
                     lines = "".join(f"<li>{html.escape(x)}</li>" for x in gw.summary(sess))
-                    msg = (f"<b>Тренировка {mode} в Garmin Connect:</b> «{html.escape(gw.garmin_name(sess))}» (№{wid}). "
-                           f"Теперь отправь её на часы из Garmin Connect.<ul>{lines}</ul>")
+                    tail = "" if dev else " Отправь её на часы из Garmin Connect."
+                    msg = (f"<b>В Garmin Connect: {html.escape(text)}.</b> «{html.escape(gw.garmin_name(sess))}».{tail}<ul>{lines}</ul>")
                 except Exception as ex:
                     msg = f"<b>Не отправлено:</b> {html.escape(str(ex))}"
                 return self._send(200, page(con, cfg, notice=msg).encode())
+            elif path.endswith("push_toggle"):
+                stg.set_value("push_to_device", (form.get("on") or [""])[0] == "1")
             elif path.endswith("enrich"):
                 row, data = program.active(con)
                 if data:

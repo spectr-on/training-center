@@ -1,4 +1,6 @@
 """Сборка силовой тренировки для Garmin Connect и отправка. Формат снят с реальных тренировок Garmin."""
+import hashlib
+import inspect
 import json
 import statistics
 from datetime import datetime
@@ -163,9 +165,15 @@ def garmin_name(session):
     return session.get("garmin_name") or f"{session['name']} · ТЦ"
 
 
+def payload_hash(payload):
+    p = {k: v for k, v in payload.items() if k != "workoutId"}
+    return hashlib.sha1(json.dumps(p, sort_keys=True, ensure_ascii=False).encode()).hexdigest()
+
+
 def send(api, con, session, cats):
     """Создаёт или обновляет НАШУ тренировку в Garmin. Чужие тренировки не трогает. -> (workout_id, режим)"""
     payload = build_workout(session, garmin_name(session), cats)
+    h = payload_hash(payload)
     row = con.execute("SELECT workout_id FROM garmin_workout WHERE session_key=?", (session["key"],)).fetchone()
     mode = "создана"
     wid = None
@@ -182,7 +190,79 @@ def send(api, con, session, cats):
         wid = res.get("workoutId") if isinstance(res, dict) else None
         if not wid:
             raise WorkoutError(f"Garmin не вернул номер тренировки: {str(res)[:200]}")
-    con.execute("INSERT OR REPLACE INTO garmin_workout VALUES(?,?,?,?)",
-                (session["key"], wid, payload["workoutName"], timeutil.now()))
+    con.execute("INSERT OR REPLACE INTO garmin_workout(session_key,workout_id,name,updated_at,payload_hash) VALUES(?,?,?,?,?)",
+                (session["key"], wid, payload["workoutName"], timeutil.now(), h))
     con.commit()
     return wid, mode
+
+
+def push_to_device(api, wid):
+    """Пробует отправить тренировку на часы. Возвращает текст-итог (ошибки не бросает)."""
+    fn = getattr(api, "push_workout_to_device", None)
+    if fn is None:
+        return "в библиотеке нет метода отправки на часы"
+    try:
+        need = [p for p in inspect.signature(fn).parameters.values()
+                if p.default is inspect._empty and p.kind in (p.POSITIONAL_ONLY, p.POSITIONAL_OR_KEYWORD)]
+        if len(need) > 1:
+            return f"метод требует параметры: {', '.join(p.name for p in need)} — не отправлено"
+        fn(wid)
+        return "отправлена на часы"
+    except Exception as e:
+        return f"на часы не отправлено: {e}"
+
+
+def log_push(con, key, why, ok, text):
+    con.execute("INSERT INTO push_log(at,session_key,why,ok,text) VALUES(?,?,?,?,?)", (timeutil.now(), key, why, 1 if ok else 0, text[:400]))
+    con.commit()
+
+
+def push_session(con, api, session, cats, why, device=False):
+    """send + журнал (+ необязательная отправка на часы). Возвращает (wid, текст-итог)."""
+    try:
+        wid, mode = send(api, con, session, cats)
+    except Exception as e:
+        log_push(con, session["key"], why, False, str(e))
+        raise
+    text = f"тренировка {mode} (№{wid})"
+    if device:
+        text += "; " + push_to_device(api, wid)
+    log_push(con, session["key"], why, True, text)
+    return wid, text
+
+
+def sync_all(con, data, api_factory, why="после синхронизации", device=False):
+    """Для каждой ранее отправленной тренировки сверяет программу с тем, что ушло в Garmin, и обновляет при расхождении.
+    До входа в Garmin доходит только если есть что отправлять. -> список (ключ, ок, текст)."""
+    cats = category_map(con)
+    todo = []
+    for s in data["sessions"]:
+        if s["kind"] != "strength":
+            continue
+        row = con.execute("SELECT payload_hash FROM garmin_workout WHERE session_key=?", (s["key"],)).fetchone()
+        if not row:
+            continue          # эту тренировку ещё ни разу не отправляли вручную — сами не создаём
+        try:
+            h = payload_hash(build_workout(s, garmin_name(s), cats))
+        except WorkoutError as e:
+            log_push(con, s["key"], why, False, str(e))
+            continue
+        if h != row["payload_hash"]:
+            todo.append(s)
+    if not todo:
+        return []
+    out = []
+    try:
+        api = api_factory()
+    except Exception as e:
+        for s in todo:
+            log_push(con, s["key"], why, False, f"вход в Garmin не удался: {e}")
+            out.append((s["key"], False, str(e)))
+        return out
+    for s in todo:
+        try:
+            _, text = push_session(con, api, s, cats, why, device)
+            out.append((s["key"], True, text))
+        except Exception as e:
+            out.append((s["key"], False, str(e)))
+    return out

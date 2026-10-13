@@ -33,3 +33,13 @@ def set_days(days):
     d = load()
     d["days"] = days
     save(d)
+
+
+def get(key, default=None):
+    return load().get(key, default)
+
+
+def set_value(key, value):
+    d = load()
+    d[key] = value
+    save(d)
