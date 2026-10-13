@@ -171,7 +171,7 @@ def program_html(con, notice=None, editor_text=None):
              "и сама обновляет в Garmin при расхождении (например, после прибавки веса).</small></p>"
              f"<form method=post action=push_toggle><input type=hidden name=on value={0 if on else 1}>"
              f"<button>{'Выключить' if on else 'Включить'} автоматическую отправку на часы</button> "
-             f"<small>сейчас: {'включена' if on else 'выключена'} (экспериментально: метод библиотеки не проверен на твоих часах)</small></form>")
+             f"<small>сейчас: {'включена' if on else 'выключена'}</small></form>")
     plog = con.execute("SELECT * FROM push_log ORDER BY id DESC LIMIT 6").fetchall()
     if plog:
         h.append("<table><tr><th>Когда</th><th>Тренировка</th><th>Повод</th><th>Итог</th></tr>" + "".join(
