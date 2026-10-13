@@ -127,6 +127,15 @@ def plan_html(con):
     return h
 
 
+def gain_text(r):
+    """Текст прибавки из progress_log с русским названием упражнения.
+    В базе хранится код Garmin (его разбирает report.py), название подставляется только при показе,
+    через ru() — то же, что в блоке «Программа», включая /config/exercise_names.json."""
+    text = r["text"] or ""
+    code = r["code"]
+    return text.replace(code, ru(code), 1) if code and code in text else text
+
+
 def program_html(con, notice=None, editor_text=None):
     e = html.escape
     row, data = program.active(con)
@@ -150,7 +159,7 @@ def program_html(con, notice=None, editor_text=None):
                 h.append(f"<div class={'ss' if b['type'] == 'superset' else 'ex'}>{'<span class=tag>Суперсет</span>' if b['type'] == 'superset' else ''}{lines}</div>")
         log = con.execute("SELECT * FROM progress_log WHERE code!='*' ORDER BY at DESC LIMIT 6").fetchall()
         if log:
-            h.append("<h3>Последние прибавки веса</h3><ul>" + "".join(f"<li>{e(r['at'][:10])}: {e(r['text'])}</li>" for r in log) + "</ul>")
+            h.append("<h3>Последние прибавки веса</h3><ul>" + "".join(f"<li>{e(r['at'][:10])}: {e(gain_text(r))}</li>" for r in log) + "</ul>")
     else:
         h.append("<p>Программы пока нет. Создай черновик из последних тренировок Garmin «Full Body A» и «Full Body B».</p>")
     h.append("<form method=post action=draft><button>Создать черновик из Garmin</button></form>")

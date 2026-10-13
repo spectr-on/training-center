@@ -53,3 +53,16 @@ def test_new_names_and_overrides(tmp_path=None):
         assert en.ru("WEIRD_THING") == "Моё упражнение"
     finally:
         en.OVERRIDES_FILE = old
+
+
+def test_gain_text_uses_names_and_overrides():
+    import tempfile, json, pathlib
+    from app import exercise_names as en, web
+    row = {"code": "BARBELL_BENCH_PRESS", "text": "Full Body A: BARBELL_BENCH_PRESS 90/95/95 → 95/95/95"}
+    assert web.gain_text(row) == "Full Body A: Жим штанги лёжа 90/95/95 → 95/95/95"
+    f = pathlib.Path(tempfile.mktemp()); f.write_text(json.dumps({"BARBELL_BENCH_PRESS": "Мой жим"}), encoding="utf-8")
+    old = en.OVERRIDES_FILE; en.OVERRIDES_FILE = f
+    try:
+        assert web.gain_text(row) == "Full Body A: Мой жим 90/95/95 → 95/95/95"
+    finally:
+        en.OVERRIDES_FILE = old
