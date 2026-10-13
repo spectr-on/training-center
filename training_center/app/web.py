@@ -232,6 +232,10 @@ def body_html(con, msg=None):
     h = ["<h2>Вес и замеры</h2>"]
     if msg:
         h.append(f"<div class={'note' if msg[0] else 'err'}>{e(msg[1])}</div>")
+    wdue, wlast, wpassed, wiv = body.weight_status(con, today)
+    if wdue:
+        wwhen = "записей веса ещё нет" if wlast is None else f"последняя запись {e(wlast)}, прошло {wpassed} дн."
+        h.append(f"<div class=warn><b>Пора взвеситься</b> ({wwhen}; напоминание, если нет записи {wiv} дн.). Форма ниже.</div>")
     due, last, passed, iv = body.measure_status(con, today)
     if due:
         when = "ещё ни разу не делали" if last is None else f"последние {e(last)}, прошло {passed} дн."

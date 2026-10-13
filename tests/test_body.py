@@ -65,6 +65,21 @@ def test_measures_merge_and_due():
     assert len(body.last_measures(con, 5)) == 1
 
 
+def test_weigh_due_after_3_days():
+    con = fresh()
+    assert body.weight_status(con, TODAY) == (True, None, None, 3)
+    body.add_weight(con, "2026-10-10 07:00", {"weight_kg": "86"}, TODAY)
+    assert body.weight_status(con, datetime.date(2026, 10, 12))[:3] == (False, "2026-10-10", 2)
+    assert body.weight_status(con, TODAY)[:3] == (True, "2026-10-10", 3)           # три дня без записи — пора
+    body.add_weight(con, "2026-10-13 21:00", {"weight_kg": "86"}, TODAY)           # время суток не важно, считаем по дате
+    assert body.weight_status(con, TODAY)[0] is False
+    stg.set_value("weigh_interval_days", 1)
+    assert body.weight_status(con, datetime.date(2026, 10, 14))[0] is True
+    stg.set_value("weigh_interval_days", 0)
+    assert body.weigh_interval_days() == 3
+    stg.set_value("weigh_interval_days", 3)
+
+
 def test_run_feel():
     con = fresh()
     assert [r["id"] for r in body.pending_feel(con, TODAY)] == [9]
@@ -80,13 +95,13 @@ def test_page_renders_and_sections():
     con = fresh()
     cfg = {"weight_divisor": 1000.0}
     t = web.page(con, cfg)
-    for s in ("Вес и замеры", "Пора делать замеры лентой", "Как ощущался бег?", "action=weight", "action=measure", "action=run_feel"):
+    for s in ("Вес и замеры", "Пора взвеситься", "Пора делать замеры лентой", "Как ощущался бег?", "action=weight", "action=measure", "action=run_feel"):
         assert s in t, s
     body.add_weight(con, "", {"weight_kg": "86.5"})
     body.add_measures(con, "", {"waist": "90"})
     body.set_feel(con, 9, 3)
     t = web.page(con, cfg, body_msg=(False, "Не сохранено: <тест>"))
-    assert "Как ощущался бег?" not in t and "Пора делать замеры лентой</b>" not in t and "&lt;тест&gt;" in t
+    assert "Как ощущался бег?" not in t and "Пора делать замеры лентой</b>" not in t and "Пора взвеситься" not in t and "&lt;тест&gt;" in t
     assert "86.5" in t or "86,5" in t
 
 

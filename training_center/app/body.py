@@ -5,6 +5,7 @@ from . import timeutil, settings as stg
 
 SOURCE = "manual"
 MEASURE_INTERVAL_DAYS = 28          # как часто делать полные замеры лентой
+WEIGH_INTERVAL_DAYS = 3             # напоминание, если веса не было столько дней
 RUN_TYPES = ("running", "treadmill_running", "trail_running")
 
 # поле формы -> (подпись, минимум, максимум, обязательное)
@@ -36,6 +37,14 @@ def interval_days():
         return v if v > 0 else MEASURE_INTERVAL_DAYS
     except (TypeError, ValueError):
         return MEASURE_INTERVAL_DAYS
+
+
+def weigh_interval_days():
+    try:
+        v = int(stg.get("weigh_interval_days", WEIGH_INTERVAL_DAYS))
+        return v if v > 0 else WEIGH_INTERVAL_DAYS
+    except (TypeError, ValueError):
+        return WEIGH_INTERVAL_DAYS
 
 
 def num(text):
@@ -92,6 +101,18 @@ def add_weight(con, at_text, form, today=None):
                 (at, vals["weight_kg"], vals.get("fat_pct"), vals.get("water_pct"), SOURCE, note))
     con.commit()
     return True, f"Вес записан: {vals['weight_kg']:g} кг, {at[:16]}."
+
+
+def weight_status(con, today=None):
+    """-> (пора ли взвеситься, дата последней записи или None, дней прошло или None, интервал).
+    Пора, если записи не было interval дней (например, последняя 10.10, сегодня 13.10 — пора)."""
+    today = today or timeutil.today()
+    iv = weigh_interval_days()
+    r = con.execute("SELECT MAX(substr(at,1,10)) AS d FROM body_weight").fetchone()
+    if not r or not r["d"]:
+        return True, None, None, iv
+    days = (today - date.fromisoformat(r["d"])).days
+    return days >= iv, r["d"], days, iv
 
 
 def delete_weight(con, row_id):

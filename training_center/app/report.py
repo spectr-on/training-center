@@ -278,6 +278,9 @@ def build(con, today=None, days=7, div=1000.0, hide=()):
     L += _measure_block(con)
     if not body.weights_between(con, start, today):
         notes.append("За период нет записей веса тела")
+    wdue, wlast, wpassed, wiv = body.weight_status(con, today)
+    if wdue and wlast is not None:
+        notes.append(f"Давно не было взвешивания: последняя запись {wlast}, прошло {wpassed} дн.")
     due, last, passed, iv = body.measure_status(con, today)
     if due:
         notes.append("Полных замеров лентой ещё не было" if last is None else
