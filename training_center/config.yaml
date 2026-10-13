@@ -1,5 +1,5 @@
 name: Тренировочный центр
-version: "0.6.0"
+version: "0.7.0"
 slug: training_center
 description: Синхронизация Garmin, план тренировок, светофор и отчёты
 arch: [amd64, aarch64]
@@ -12,5 +12,9 @@ panel_icon: mdi:dumbbell
 panel_title: Тренировки
 map:
   - addon_config:rw
-options: {}
-schema: {}
+options:
+  github_token: ""
+  github_repo: "spectr-on/training-reports"
+schema:
+  github_token: password?
+  github_repo: str?

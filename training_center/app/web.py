@@ -2,7 +2,7 @@
 import html, threading
 from .blocks import group_blocks
 from .exercise_names import ru, overrides_status
-from . import traffic, plan, program, sync, timeutil, garmin_workout as gw, settings as stg
+from . import traffic, plan, program, sync, timeutil, report, garmin_workout as gw, settings as stg
 from datetime import date, timedelta
 import json as _json
 from urllib.parse import parse_qs, urlparse
@@ -187,13 +187,36 @@ def program_html(con, notice=None, editor_text=None):
     return h
 
 
-def page(con, cfg, notice=None, editor_text=None):
+def report_html(con, cfg, text=None, notice=None):
+    e = html.escape
+    st = stg.get("report_status") or {}
+    auto = bool(stg.get("report_auto", False))
+    h = ["<h2>Отчёт для ИИ</h2>"]
+    if notice:
+        h.append(f"<div class=err>{notice}</div>")
+    if st:
+        h.append(f"<p>Последняя отправка: {e(st.get('at', ''))} — {'<span class=ok>ок</span>' if st.get('ok') else '<span class=bad>сбой</span>'} {e(st.get('text', ''))}</p>")
+    h.append("<form method=post action=report><select name=days><option value=7>7 дней</option><option value=14>14 дней</option>"
+             "<option value=30>30 дней</option></select> <button name=do value=make>Сформировать</button> "
+             "<button name=do value=push>Отправить в GitHub</button></form>")
+    h.append(f"<form method=post action=report_auto><input type=hidden name=on value={0 if auto else 1}>"
+             f"<button>{'Выключить' if auto else 'Включить'} автоотчёт после новой тренировки</button> <small>сейчас: {'включён' if auto else 'выключен'}</small></form>")
+    if not report.get_token():
+        h.append("<p><small>Токен GitHub не задан: отправка недоступна, отчёт можно скопировать вручную.</small></p>")
+    if text:
+        h.append("<details open><summary>Текст отчёта (выдели всё и скопируй)</summary>"
+                 f"<textarea readonly rows=25 style='width:100%;font-family:monospace' onclick='this.select()'>{e(text)}</textarea></details>")
+    return h
+
+
+def page(con, cfg, notice=None, editor_text=None, report_text=None):
     e = html.escape
     runs = con.execute("SELECT * FROM sync_run ORDER BY id DESC LIMIT 8").fetchall()
     h = [f"<h1>Тренировочный центр</h1><form method=post action=sync><button>Синхронизировать с Garmin</button></form>"]
     h += traffic_html(con)
     h += plan_html(con)
     h += program_html(con, notice, editor_text)
+    h += report_html(con, cfg, report_text, None)
     h += [
          "<h2>Синхронизации</h2><table><tr><th>Начало</th><th>Запуск</th><th>Итог</th><th>Дней</th><th>Тренировок</th><th>Подходов</th><th>Ошибки</th></tr>"]
     for r in runs:
@@ -288,6 +311,16 @@ def serve(con, cfg, start_sync, port=8099):
                     n = gw.enrich(con, data)
                     if n:
                         program.save_version(con, program.dump(data), "ручная", f"дополнено из Garmin (отдых, категории): {n} знач.", True)
+            elif path.endswith("report_auto"):
+                stg.set_value("report_auto", (form.get("on") or [""])[0] == "1")
+            elif path.endswith("report"):
+                days = int((form.get("days") or ["7"])[0]) if (form.get("days") or ["7"])[0].isdigit() else 7
+                text = report.build(con, days=min(max(days, 1), 60), div=cfg["weight_divisor"])
+                notice = None
+                if (form.get("do") or [""])[0] == "push":
+                    ok, msg = report.push(text)
+                    notice = (f"<b>{'Отправлено' if ok else 'Не отправлено'}:</b> {html.escape(msg)}")
+                return self._send(200, page(con, cfg, notice=notice, report_text=text).encode())
             elif path.endswith("rollback"):
                 v = (form.get("id") or [""])[0]
                 if v.isdigit():

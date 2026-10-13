@@ -1,5 +1,5 @@
 import threading, time
-from . import timeutil, db, sync, web, progress, traffic, program, settings as stg, garmin_workout as gw
+from . import report, timeutil, db, sync, web, progress, traffic, program, settings as stg, garmin_workout as gw
 
 CFG = {"weight_divisor": 1000.0, "token_dir": "/config/garmin", "db": "/data/training.db",
        "auto_hours": 3, "days_first": 30, "days_regular": 3}
@@ -35,6 +35,10 @@ def main():
                 gw.sync_all(c, data, lambda: sync.login(CFG["token_dir"]), "после синхронизации", stg.get("push_to_device", False))
         except Exception as e:  # noqa
             print("Ошибка обновления тренировки в Garmin:", e, flush=True)
+        try:
+            report.auto_after_sync(c, CFG["weight_divisor"])
+        except Exception as e:  # noqa
+            print("Ошибка автоотчёта:", e, flush=True)
 
     def loop():
         start_sync("при запуске")
