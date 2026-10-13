@@ -159,7 +159,7 @@ def program_html(con, notice=None, editor_text=None):
                 h.append(f"<div class={'ss' if b['type'] == 'superset' else 'ex'}>{'<span class=tag>Суперсет</span>' if b['type'] == 'superset' else ''}{lines}</div>")
         log = con.execute("SELECT * FROM progress_log WHERE code!='*' ORDER BY at DESC LIMIT 6").fetchall()
         if log:
-            h.append("<h3>Последние прибавки веса</h3><ul>" + "".join(f"<li>{e(r['at'][:10])}: {e(gain_text(r))}</li>" for r in log) + "</ul>")
+            h.append("<h3>Предлагаемые изменения веса</h3><ul>" + "".join(f"<li>{e(r['at'][:10])}: {e(gain_text(r))}</li>" for r in log) + "</ul>")
     else:
         h.append("<p>Программы пока нет. Создай черновик из последних тренировок Garmin «Full Body A» и «Full Body B».</p>")
     h.append("<form method=post action=draft><button>Создать черновик из Garmin</button></form>")
