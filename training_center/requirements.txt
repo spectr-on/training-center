@@ -1,3 +1,4 @@
 garminconnect==0.3.17
 pyyaml>=6,<7
 tzdata
+paho-mqtt>=2.1,<3

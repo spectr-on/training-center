@@ -1,5 +1,5 @@
 import threading, time
-from . import report, timeutil, db, sync, web, progress, traffic, program, settings as stg, garmin_workout as gw
+from . import report, timeutil, db, sync, web, progress, traffic, program, ha_mqtt, settings as stg, garmin_workout as gw
 
 CFG = {"weight_divisor": 1000.0, "token_dir": "/config/garmin", "db": "/data/training.db",
        "auto_hours": 3, "days_first": 30, "days_regular": 3}
@@ -17,6 +17,9 @@ def main():
     print("Часовой пояс:", timeutil.setup(), timeutil.now(), flush=True)
     con = db.connect(CFG["db"])
     first = con.execute("SELECT COUNT(*) FROM sync_run WHERE ok=1").fetchone()[0] == 0
+    ha_mqtt.mark_existing_announced(con)
+    bridge = ha_mqtt.Bridge(lambda: db.connect(CFG["db"]), web.current_slots)
+    bridge.start()
 
     def start_sync(trigger):
         nonlocal first
@@ -39,6 +42,10 @@ def main():
             report.auto_after_sync(c, CFG["weight_divisor"])
         except Exception as e:  # noqa
             print("Ошибка автоотчёта:", e, flush=True)
+        try:
+            bridge.after_sync()
+        except Exception as e:  # noqa — сбой MQTT не должен ломать синхронизацию
+            print("Ошибка публикации в MQTT:", e, flush=True)
 
     def loop():
         start_sync("при запуске")

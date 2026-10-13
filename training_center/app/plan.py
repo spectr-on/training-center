@@ -58,6 +58,6 @@ def week_status(con, settings, mon, today):
                 st = "late"
             else:
                 st = "planned"
-        out.append({"slot": s, "status": st, "date": when, "planned": planned})
+        out.append({"slot": s, "status": st, "date": when, "planned": planned, "activity": a})
     week_ok = all(x["status"] in ("done", "moved") for x in out)
     return out, week_ok

@@ -1,5 +1,5 @@
 name: Тренировочный центр
-version: "0.7.0"
+version: "0.8.0"
 slug: training_center
 description: Синхронизация Garmin, план тренировок, светофор и отчёты
 arch: [amd64, aarch64]
@@ -8,6 +8,9 @@ boot: auto
 init: false
 ingress: true
 ingress_port: 8099
+services:
+  - mqtt:want
+homeassistant_api: true
 panel_icon: mdi:dumbbell
 panel_title: Тренировки
 map:
@@ -15,6 +18,14 @@ map:
 options:
   github_token: ""
   github_repo: "spectr-on/training-reports"
+  mqtt_host: ""
+  mqtt_port: 1883
+  mqtt_user: ""
+  mqtt_password: ""
 schema:
   github_token: password?
   github_repo: str?
+  mqtt_host: str?
+  mqtt_port: port?
+  mqtt_user: str?
+  mqtt_password: password?

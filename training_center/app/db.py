@@ -31,6 +31,10 @@ MIGRATIONS = [
     ALTER TABLE garmin_workout ADD COLUMN payload_hash TEXT;
     CREATE TABLE push_log(id INTEGER PRIMARY KEY AUTOINCREMENT, at TEXT, session_key TEXT, why TEXT, ok INTEGER, text TEXT);
     """,
+    # 6: активности, о которых уже сообщено событием training_workout_done
+    """
+    CREATE TABLE mqtt_event(activity_id INTEGER PRIMARY KEY, at TEXT);
+    """,
 ]
 
 
