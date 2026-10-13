@@ -12,8 +12,6 @@ WEIGHT_FIELDS = {
     "weight_kg": ("Вес, кг", 30, 300, True),
     "fat_pct": ("Жир, %", 2, 70, False),
     "water_pct": ("Вода, %", 20, 80, False),
-    "bone_kg": ("Кости, кг", 0.5, 10, False),
-    "visceral": ("Висцеральный жир, ед.", 1, 30, False),
 }
 
 # ключ -> (подпись, как мерить)
@@ -90,9 +88,8 @@ def add_weight(con, at_text, form, today=None):
             return False, f"Не сохранено: «{label}» должно быть от {lo:g} до {hi:g}."
         vals[key] = v
     note = (form.get("note") or "").strip()[:200] or None
-    con.execute("INSERT INTO body_weight(at,weight_kg,fat_pct,water_pct,bone_kg,visceral,source,note) VALUES(?,?,?,?,?,?,?,?)",
-                (at, vals["weight_kg"], vals.get("fat_pct"), vals.get("water_pct"), vals.get("bone_kg"),
-                 vals.get("visceral"), SOURCE, note))
+    con.execute("INSERT INTO body_weight(at,weight_kg,fat_pct,water_pct,source,note) VALUES(?,?,?,?,?,?)",
+                (at, vals["weight_kg"], vals.get("fat_pct"), vals.get("water_pct"), SOURCE, note))
     con.commit()
     return True, f"Вес записан: {vals['weight_kg']:g} кг, {at[:16]}."
 

@@ -248,11 +248,11 @@ def body_html(con, msg=None):
              "Жировая и безжировая масса считаются сами.</small></p>")
     rows = con.execute("SELECT * FROM body_weight ORDER BY at DESC, id DESC LIMIT 8").fetchall()
     if rows:
-        h.append("<table><tr><th>Когда</th><th>Вес, кг</th><th>Жир, %</th><th>Вода, %</th><th>Кости, кг</th><th>Висц.</th><th>Заметка</th><th></th></tr>")
+        h.append("<table><tr><th>Когда</th><th>Вес, кг</th><th>Жир, %</th><th>Вода, %</th><th>Заметка</th><th></th></tr>")
         v = lambda x: "" if x is None else f"{x:g}"
         for r in rows:
             h.append(f"<tr><td>{e(r['at'][:16])}</td><td>{v(r['weight_kg'])}</td><td>{v(r['fat_pct'])}</td><td>{v(r['water_pct'])}</td>"
-                     f"<td>{v(r['bone_kg'])}</td><td>{v(r['visceral'])}</td><td>{e(r['note'] or '')}</td>"
+                     f"<td>{e(r['note'] or '')}</td>"
                      f"<td><form method=post action=weight_del><input type=hidden name=id value={r['id']}><button>Удалить</button></form></td></tr>")
         h.append("</table>")
     mf = "".join(f"<label title='{e(how)}'>{e(lbl)}<input name={k} inputmode=decimal></label>" for k, (lbl, how) in body.MEASURES.items())
