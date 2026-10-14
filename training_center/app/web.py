@@ -173,31 +173,29 @@ def traffic_html(con):
                 "<p><small>Открой приложение Garmin Connect на телефоне, дождись синхронизации часов и нажми «Синхронизировать с Garmin». "
                 "Утром аддон также сам повторяет синхронизацию каждые 15 минут, пока данные не появятся.</small></p></div></div>"]
     color, why, notes = traffic.decide(m)
+    if color == "green":
+        why = ["Все условия зелёного выполнены"]
     f = lambda v, u="": "—" if v is None else f"{v}{u}"
-    rd = f"Readiness {f(m['readiness'])}"
-    rd_title = f"измерен в {m['readiness_at']}" if m["readiness_at"] else ""
-    if m["readiness_now"] not in (None, m["readiness"]):
-        rd_title += f"; последнее обновление Garmin {m['readiness_now']} ({m['readiness_now_at']})"
-    bb_title = (m["bb_note"].strip(" ()") + ". " if m["bb_note"] else "")
-    if m["bb_now"] not in (None, m["bb"]):
-        bb_title += f"На последней синхронизации {m['bb_now']}"
-    chips = [(rd, rd_title), (f"Body Battery {f(m['bb'])}", bb_title), (f"Сон {f(m['sleep_h'], ' ч')}", f"Sleep Score {f(m['sleep_score'])}"),
-             (f"HRV {f(m['hrv'])}", ""), (f"Пульс покоя {f(m['rhr'])}", "")]
-    chips_html = "".join(f"<span class=chip{f' title={chr(39)}{e(t)}{chr(39)}' if t else ''}>{e(c)}</span>" for c, t in chips)
+    chip = lambda c, t="": f"<span class=chip{f' title={chr(39)}{e(t)}{chr(39)}' if t else ''}>{e(c)}</span>"
+    cap = "Начало дня" + (f" · {m['readiness_at']}" if m["readiness_at"] else "")
+    morning = [chip(f"Readiness {f(m['readiness'])}"), chip(f"Body Battery {f(m['bb'])}"),
+               chip(f"Сон {f(m['sleep_h'], ' ч')}", f"Sleep Score {f(m['sleep_score'])}"),
+               chip(f"HRV {f(m['hrv'])}"), chip(f"Пульс покоя {f(m['rhr'])}")]
+    rows = [f"<div class=chips><span class=rowcap>{e(cap)}</span>{''.join(morning)}</div>"]
+    rd_diff = m["readiness_now"] not in (None, m["readiness"])
+    bb_diff = m["bb_now"] not in (None, m["bb"])
+    if rd_diff or bb_diff:
+        now_chips = []
+        if m["readiness_now"] is not None:
+            now_chips.append(chip(f"Readiness {m['readiness_now']}", f"обновление Garmin в {m['readiness_now_at']}" if m["readiness_now_at"] else ""))
+        if m["bb_now"] is not None:
+            now_chips.append(chip(f"Body Battery {m['bb_now']}", "на последней синхронизации"))
+        rows.append(f"<div class='chips rownow'><span class=rowcap>Сейчас</span>{''.join(now_chips)}</div>")
     more = [f"<p><b>План:</b> {e(traffic.PLANS[color])}</p>"]
     if notes:
         more.append(f"<p><small>{e('; '.join(notes))}</small></p>")
-    extra = []
-    if m["readiness_at"]:
-        extra.append(f"Readiness измерен в {m['readiness_at']}")
-    if m["readiness_now"] not in (None, m["readiness"]):
-        extra.append(f"последнее обновление Garmin {m['readiness_now']} ({m['readiness_now_at']})")
     if m["bb_note"]:
-        extra.append(f"Body Battery{m['bb_note']}")
-    if m["bb_now"] not in (None, m["bb"]):
-        extra.append(f"Body Battery на последней синхронизации {m['bb_now']}")
-    if extra:
-        more.append(f"<p><small>{e('; '.join(extra))}</small></p>")
+        more.append(f"<p><small>Body Battery в начале дня:{e(m['bb_note'])}, значения на пробуждении нет.</small></p>")
     life = {}
     row = con.execute("SELECT json FROM daily_raw WHERE date=? AND kind='lifestyle'", ((today - timedelta(days=1)).isoformat(),)).fetchone()
     if row:
@@ -210,7 +208,7 @@ def traffic_html(con):
         names = {"alcohol": "алкоголь", "hookah": "кальян", "illness": "болезнь"}
         more.append(f"<p><small>Вчера отмечено: {e(', '.join(names[k] for k in life))}. Сегодня бег только лёгкий, без интервалов.</small></p>")
     return [f"<div class='card tlcard {color}'><div class=tl><div class=lamp></div><div><div class=cap>Светофор на {d}</div>"
-            f"<h3>{TL_NAME[color]}</h3><p>{e('; '.join(why))}</p></div></div><div class=chips>{chips_html}</div>"
+            f"<h3>{TL_NAME[color]}</h3><p>{e('; '.join(why))}</p></div></div>{''.join(rows)}"
             f"<div class=more>{''.join(more)}</div></div>"]
 
 

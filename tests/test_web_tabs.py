@@ -70,6 +70,28 @@ def test_post_theme_and_redirect_tab():
     assert post("report_auto", on="1") == (303, "./#hist")
 
 
+def test_traffic_morning_and_now_rows():
+    import json
+    con = fresh()
+    d = timeutil.today().isoformat()
+    put = lambda kind, data: con.execute("INSERT OR REPLACE INTO daily_raw VALUES(?,?,?,?)", (d, kind, json.dumps(data), "x"))
+    put("readiness", [{"inputContext": "AFTER_WAKEUP_RESET", "timestampLocal": f"{d}T07:21:00", "score": 78}])
+    put("stats", {"bodyBatteryAtWakeTime": 86, "restingHeartRate": 58, "bodyBatteryMostRecentValue": 86})
+    put("sleep", {"dailySleepDTO": {"sleepTimeSeconds": int(7.4 * 3600), "sleepScores": {"overall": {"value": 70}}}})
+    put("hrv", {"hrvSummary": {"lastNightAvg": 41}})
+    p = web.page(con, {"weight_divisor": 1000.0})
+    assert "Начало дня · 07:21" in p and "rownow" not in p and "Все условия зелёного выполнены" in p
+    assert "Body Battery 86" in p and "Readiness 70+" not in p
+    # днём значения изменились -> появляется строка «Сейчас» только с Readiness и Body Battery
+    put("readiness", [{"inputContext": "AFTER_WAKEUP_RESET", "timestampLocal": f"{d}T07:21:00", "score": 78},
+                      {"inputContext": "AFTER_POST_EXERCISE_RESET", "timestampLocal": f"{d}T10:15:00", "score": 64}])
+    put("stats", {"bodyBatteryAtWakeTime": 86, "restingHeartRate": 58, "bodyBatteryMostRecentValue": 52})
+    p = web.page(con, {"weight_divisor": 1000.0})
+    row = p[p.index("rownow"):]
+    row = row[:row.index("</div>")]
+    assert "Readiness 64" in row and "Body Battery 52" in row and "HRV" not in row and "Сон" not in row and "Пульс" not in row
+
+
 if __name__ == "__main__":
     for k, v in list(globals().items()):
         if k.startswith("test_"):
