@@ -9,7 +9,7 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from .blocks import group_blocks
 from .exercise_names import ru, overrides_status
-from . import traffic, plan, program, sync, timeutil, report, body, garmin_workout as gw, settings as stg
+from . import traffic, plan, program, progress, sync, timeutil, report, body, garmin_workout as gw, settings as stg
 import json as _json
 from urllib.parse import parse_qs, urlparse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -36,6 +36,20 @@ TAB_OF = {"settings": "week", "draft": "prog", "program": "prog", "garmin_send":
 THEMES = ["auto", "light", "dark"]
 THEME_NAME = {"auto": "Авто", "light": "Светлая", "dark": "Тёмная"}
 STALE_HOURS = 6   # синхронизация старше — точка становится жёлтой
+
+
+def num(v):
+    """Число для показа по-русски: 2,5 · 95 · 4,5."""
+    return f"{v:g}".replace(".", ",")
+
+
+def plural(n, forms):
+    n = abs(int(n))
+    if n % 10 == 1 and n % 100 != 11:
+        return forms[0]
+    if 2 <= n % 10 <= 4 and not 12 <= n % 100 <= 14:
+        return forms[1]
+    return forms[2]
 
 
 def acc(key, title, sub="", content="", open_=False, force=False, cls=""):
@@ -257,26 +271,39 @@ def current_slots(con):
 
 # ---------- вкладка «Неделя» ----------
 
+SHORT = {"done": "выполнено", "moved": "перенос", "today": "сегодня", "planned": "впереди", "late": "просрочено", "missed": "пропущено"}
+STCLS = {"done": "done", "moved": "done", "today": "today", "planned": "plan", "late": "late", "missed": "miss"}
+
+
 def plan_table(con, slots, weeks):
-    """-> (html, выполнено в текущей неделе, всего слотов)."""
+    """-> (html, выполнено в текущей неделе, всего слотов). Статусы цветными метками, текущая неделя подсвечена."""
     e = html.escape
     cfg = {"slots": slots}
     today = timeutil.today()
     mon = plan.monday(today)
-    dn = lambda d: "любой день" if d is None else DAYS[d]
-    h = ["<table><tr><th>Неделя</th>" + "".join(f"<th>{e(s['label'])}<br><small>план: {dn(s['day'])}</small></th>" for s in slots) + "<th>Итог</th></tr>"]
+    dn = lambda d: "любой день" if d is None else "план: " + DAYS[d]
+    h = ["<table class=w1><thead><tr><th>Неделя</th>" + "".join(f"<th>{e(s['label'])}<small>{dn(s['day'])}</small></th>" for s in slots)
+         + "<th>Итог</th></tr></thead><tbody>"]
     done_now = 0
     for w in range(weeks):
         wm = mon - timedelta(days=7 * w)
         cells, ok = plan.week_status(con, cfg, wm, today)
+        n_done = sum(1 for c in cells if c["status"] in ("done", "moved"))
         if w == 0:
-            done_now = sum(1 for c in cells if c["status"] in ("done", "moved"))
-        h.append(f"<tr><td>{wm.strftime('%d.%m')}–{(wm + timedelta(days=6)).strftime('%d.%m')}</td>")
+            done_now = n_done
+        rng = f"{wm.strftime('%d.%m')}–{(wm + timedelta(days=6)).strftime('%d.%m')}"
+        h.append(f"<tr{' class=cur' if w == 0 else ''}><td>{'<b>' + rng + '</b>' if w == 0 else rng}</td>")
         for c in cells:
-            h.append(f"<td class='c-{c['status']}'>{e(plan.LABEL[c['status']])}<br><small>{'' if c['date'] is None else c['date'].strftime('%d.%m') + ' ' + DAYS[c['date'].weekday()]}</small></td>")
-        done = all(c['status'] in ('done', 'moved') for c in cells)
-        h.append(f"<td>{'✅ выполнена' if done else ('идёт' if w == 0 else '❌ не выполнена')}</td></tr>")
-    h.append("</table>")
+            when = "" if c["date"] is None else f"<small>{c['date'].strftime('%d.%m')} {DAYS[c['date'].weekday()]}</small>"
+            h.append(f"<td><span class='st {STCLS[c['status']]}' title='{e(plan.LABEL[c['status']])}'>{SHORT[c['status']]}</span>{when}</td>")
+        if n_done == len(cells):
+            res = "<span class='res ok'>выполнена</span>"
+        elif w == 0:
+            res = f"<span class='res go'>идёт · {n_done}/{len(cells)}</span>"
+        else:
+            res = "<span class='res no'>не выполнена</span>"
+        h.append(f"<td>{res}</td></tr>")
+    h.append("</tbody></table>")
     return "".join(h), done_now, len(slots)
 
 
@@ -310,6 +337,84 @@ def gain_text(r):
     return text.replace(code, ru(code), 1) if code and code in text else text
 
 
+def strength_table(sess, step):
+    """Таблица силовой: упражнение, веса по подходам (кг), диапазон повторов.
+    Подход, которому по правилу волны достанется следующая прибавка, подсвечен стрелкой."""
+    e = html.escape
+    rows, legend = [], False
+    for b in sess["blocks"]:
+        sup = b["type"] == "superset"
+        rounds = max(len(x["weights"]) for x in b["exercises"])
+        for x in b["exercises"]:
+            ws = x["weights"]
+            eq = x.get("equipment") or program.equipment_of(x["code"], ws)
+            bump = progress.next_bump(ws) if eq in step else None
+            chips = []
+            for i, w in enumerate(ws):
+                label = "свой вес" if not w else num(w)
+                if i == bump:
+                    legend = True
+                    tip = f"Следующая прибавка: {num(w)} → {num(w + step[eq])} кг, когда все подходы выполнены на верх диапазона"
+                    chips.append(f"<span class='wchip up' title='{e(tip)}'>{label}</span>")
+                else:
+                    chips.append(f"<span class=wchip>{label}</span>")
+            tag = f"<span class=tag>Суперсет · {rounds} кр.</span>" if sup else ""
+            rows.append(f"<tr{' class=ssr' if sup else ''}><td>{tag}{e(ru(x['code']))}</td><td>{''.join(chips)}</td>"
+                        f"<td><span class=reps>{x['reps'][0]}–{x['reps'][1]}</span></td></tr>")
+    note = ("<p class=muted><small>↑ — подход, которому добавится вес, когда все подходы выполнены на верх диапазона повторов. "
+            "Вес в килограммах.</small></p>") if legend else ""
+    return ("<table class=prog><thead><tr><th>Упражнение</th><th>Вес, кг</th><th>Повторы</th></tr></thead><tbody>"
+            + "".join(rows) + "</tbody></table>" + note)
+
+
+def run_parts(s):
+    """Параметры бега из программы: (css-класс, нагрузка, зона, минуты, км); что не задано — None."""
+    lv = program.run_level(s.get("level"))
+    return (lv[0] if lv else None, lv[1] if lv else None, s.get("zone"), s.get("duration_min"), s.get("distance_km"))
+
+
+def run_summary(s):
+    cls, label, zone, mins, km = run_parts(s)
+    parts = [x for x in (label, f"Зона {zone}" if zone else None, f"{num(mins)} мин" if mins else None, f"{num(km)} км" if km else None) if x]
+    return " · ".join(parts) if parts else "без параметров"
+
+
+def run_table(s):
+    """Таблица бега: нагрузка, пульсовая зона Garmin, время, расстояние. Нет значения — прочерк."""
+    cls, label, zone, mins, km = run_parts(s)
+    dash = "<span class=dash>—</span>"
+    lvl = f"<span class='dot {cls}'></span>{label}" if label else dash
+    zn = ("<span style='white-space:nowrap'><span class=zbar>" + "".join(f"<i class='{'on ' if k <= zone else ''}z{k}'></i>" for k in range(1, 6)) + f"</span>Зона {zone}</span>") if zone else dash
+    body_ = (f"<tr><td>{lvl}</td><td>{zn}</td><td>{f'{num(mins)} мин' if mins else dash}</td><td>{f'{num(km)} км' if km else dash}</td></tr>")
+    hint = ("<p class=muted><small>Параметры бега задаются в редакторе программы (YAML): level — лёгкий, обычный или интенсивный; "
+            "zone — зона Garmin 1–5; duration_min — минуты; distance_km — километры. Незаданное остаётся прочерком.</small></p>"
+            if not (label or zone or mins or km) else "")
+    return ("<table class=prog><thead><tr><th>Нагрузка</th><th>Пульсовая зона</th><th>Время</th><th>Расстояние</th></tr></thead><tbody>"
+            + body_ + "</tbody></table>" + hint)
+
+
+def week_program_table(con, data):
+    """Недельная программа одним взглядом: день, тренировка, состав, когда отправлена в Garmin."""
+    e = html.escape
+    slots = {s["key"]: s for s in current_slots(con)}
+    rows = []
+    for s in data["sessions"]:
+        day = (slots.get(s["key"]) or {}).get("day", s.get("day"))
+        if s["kind"] == "strength":
+            n_ex = sum(len(b["exercises"]) for b in s["blocks"])
+            n_ss = sum(1 for b in s["blocks"] if b["type"] == "superset")
+            comp = f"{n_ex} {plural(n_ex, ('упражнение', 'упражнения', 'упражнений'))}"
+            if n_ss:
+                comp += f", {n_ss} {plural(n_ss, ('суперсет', 'суперсета', 'суперсетов'))}"
+            sent = con.execute("SELECT updated_at FROM garmin_workout WHERE session_key=?", (s["key"],)).fetchone()
+            g = f"{sent['updated_at'][8:10]}.{sent['updated_at'][5:7]}" if sent else "<span class=dash>—</span>"
+        else:
+            comp, g = run_summary(s), "<span class=dash>—</span>"
+        rows.append(f"<tr><td>{'Любой' if day is None else DAYS[day]}</td><td><b>{e(s['name'])}</b></td><td>{e(comp)}</td><td>{g}</td></tr>")
+    return ("<table class=prog><thead><tr><th>День</th><th>Тренировка</th><th>Состав</th><th>В Garmin</th></tr></thead><tbody>"
+            + "".join(rows) + "</tbody></table>")
+
+
 def program_html(con, notice=None, editor_text=None):
     e = html.escape
     row, data = program.active(con)
@@ -318,21 +423,22 @@ def program_html(con, notice=None, editor_text=None):
     if notice:
         h.append(f"<div class=err>{notice}</div>")
     if data:
-        h.append(f"<p class=muted>Активная версия №{row['id']} ({e(row['kind'])}, {e(row['created_at'])}). Прибавка: штанга +{data['progression']['step_kg']['barbell']:g} кг, "
-                 f"гантели +{data['progression']['step_kg']['dumbbell']:g} кг. Тренировки учитываются с {e(str(data['evaluate_from']))}.</p>")
+        step = data["progression"]["step_kg"]
+        h.append(f"<p class=muted>Активная версия №{row['id']} ({e(row['kind'])}, {e(row['created_at'])}). Прибавка: штанга +{step['barbell']:g} кг, "
+                 f"гантели +{step['dumbbell']:g} кг. Тренировки учитываются с {e(str(data['evaluate_from']))}.</p>")
+        names = " · ".join(s["name"] for s in data["sessions"])
+        h.append(acc("prog-week", "Недельная программа", names, week_program_table(con, data), open_=True))
+        h.append("<div class=grp>Тренировки</div>")
         first = True
         for s in data["sessions"]:
             if s["kind"] != "strength":
-                h.append(acc("prog-run-" + s["key"], s["name"], "бег, без упражнений", "<p class=muted>Бег, без упражнений.</p>"))
+                h.append(acc("prog-run-" + s["key"], s["name"], run_summary(s), run_table(s)))
                 continue
             sent = con.execute("SELECT * FROM garmin_workout WHERE session_key=?", (s["key"],)).fetchone()
             sent_txt = f" Отправлено в Garmin: «{e(sent['name'])}», {e(sent['updated_at'])}." if sent else " В Garmin ещё не отправлялась."
-            sub = f"в Garmin: {sent['updated_at'][:10]}" if sent else "в Garmin не отправлялась"
+            sub = f"в Garmin: {sent['updated_at'][8:10]}.{sent['updated_at'][5:7]}" if sent else "в Garmin не отправлялась"
             c = [f"<form method=post action=garmin_send><input type=hidden name=key value='{e(s['key'])}'>"
-                 f"<button class=sec>Отправить в Garmin</button> <small>{sent_txt}</small></form>"]
-            for b in s["blocks"]:
-                lines = "".join(f"<div><b>{e(ru(x['code']))}</b>: {'/'.join(f'{w:g}' for w in x['weights'])} кг · повторы {x['reps'][0]}–{x['reps'][1]}</div>" for x in b["exercises"])
-                c.append(f"<div class={'ss' if b['type'] == 'superset' else 'ex'}>{'<span class=tag>Суперсет</span>' if b['type'] == 'superset' else ''}{lines}</div>")
+                 f"<button class=sec>Отправить в Garmin</button> <small>{sent_txt}</small></form>", strength_table(s, step)]
             h.append(acc("prog-s-" + s["key"], s["name"], sub, "".join(c), open_=first))
             first = False
         log = con.execute("SELECT * FROM progress_log WHERE code!='*' ORDER BY at DESC LIMIT 6").fetchall()
@@ -341,20 +447,8 @@ def program_html(con, notice=None, editor_text=None):
                          "<ul>" + "".join(f"<li>{e(r['at'][:10])}: {e(gain_text(r))}</li>" for r in log) + "</ul>"))
     else:
         h.append("<p>Программы пока нет. Создай черновик из последних тренировок Garmin «Full Body A» и «Full Body B».</p>")
-    drafts = "<form method=post action=draft><button class=sec>Создать черновик из Garmin</button></form>"
-    if data:
-        drafts += "<form method=post action=enrich><button class=sec>Дополнить программу из Garmin (отдых и категории)</button></form>"
-    h.append(acc("prog-draft", "Черновик и дополнение из Garmin", "", drafts, open_=not data))
-    text = editor_text
-    if text is None:
-        text = draft["yaml"] if draft and (not row or draft["id"] > row["id"]) else (row["yaml"] if row else "")
-    if text:
-        forced = editor_text is not None or bool(draft and (not row or draft['id'] > row['id']))
-        h.append(acc("prog-yaml", "Редактор программы (YAML)", "",
-                     f"<form method=post action=program><textarea name=yaml rows=30>{e(text)}</textarea><br>"
-                     "<button>Проверить и сохранить новой версией</button></form>"
-                     "<p><small>Вес в Garmin уходит по верхней границе диапазона повторов; диапазон хранится здесь как справка и для прибавки веса. "
-                     "weights — вес по подходам (кг), 0 — свой вес. day: 0 (пн) … 6 (вс) или без day — любой день.</small></p>", force=forced))
+    # ---- Управление тренировками: отправка на часы, редактор, версии, черновик
+    m = []
     on = bool(stg.get("push_to_device", False))
     c = ["<p><small>Если тренировка уже отправлялась, после каждой синхронизации система сверяет её с программой "
          "и сама обновляет в Garmin при расхождении (например, после прибавки веса).</small></p>"
@@ -366,7 +460,20 @@ def program_html(con, notice=None, editor_text=None):
         c.append("<table><tr><th>Когда</th><th>Тренировка</th><th>Повод</th><th>Итог</th></tr>" + "".join(
             f"<tr><td>{e(r['at'])}</td><td>{e(r['session_key'])}</td><td>{e(r['why'] or '')}</td>"
             f"<td>{'<span class=ok>ок</span>' if r['ok'] else '<span class=bad>сбой</span>'} {e(r['text'] or '')}</td></tr>" for r in plog) + "</table>")
-    h.append(acc("prog-push", "Отправка на часы", "включена" if on else "выключена", "".join(c)))
+    m.append(acc("prog-push", "Отправка на часы", "включена" if on else "выключена", "".join(c)))
+    text = editor_text
+    if text is None:
+        text = draft["yaml"] if draft and (not row or draft["id"] > row["id"]) else (row["yaml"] if row else "")
+    forced = False
+    if text:
+        forced = editor_text is not None or bool(draft and (not row or draft['id'] > row['id']))
+        m.append(acc("prog-yaml", "Редактор программы (YAML)", "",
+                     f"<form method=post action=program><textarea name=yaml rows=30>{e(text)}</textarea><br>"
+                     "<button>Проверить и сохранить новой версией</button></form>"
+                     "<p><small>Вес в Garmin уходит по верхней границе диапазона повторов; диапазон хранится здесь как справка и для прибавки веса. "
+                     "weights — вес по подходам (кг), 0 — свой вес. day: 0 (пн) … 6 (вс) или без day — любой день. "
+                     "Для бега (kind: run) необязательно: level — лёгкий/обычный/интенсивный, zone — зона Garmin 1–5, "
+                     "duration_min — минуты, distance_km — километры.</small></p>", force=forced))
     vers = con.execute("SELECT * FROM program_version ORDER BY id DESC LIMIT 8").fetchall()
     if vers:
         t = ["<table><tr><th>№</th><th>Когда</th><th>Вид</th><th>Что изменилось</th><th></th></tr>"]
@@ -374,7 +481,12 @@ def program_html(con, notice=None, editor_text=None):
             btn = "активна" if v["active"] else f"<form method=post action=rollback><input type=hidden name=id value={v['id']}><button class=sec>Откатить</button></form>"
             t.append(f"<tr><td>{v['id']}</td><td>{e(v['created_at'])}</td><td>{e(v['kind'])}</td><td>{e((v['note'] or '')[:160])}</td><td>{btn}</td></tr>")
         t.append("</table>")
-        h.append(acc("prog-versions", "Версии программы", f"последних: {len(vers)}", "".join(t)))
+        m.append(acc("prog-versions", "Версии программы", f"последних: {len(vers)}", "".join(t)))
+    drafts = "<form method=post action=draft><button class=sec>Создать черновик из Garmin</button></form>"
+    if data:
+        drafts += "<form method=post action=enrich><button class=sec>Дополнить программу из Garmin (отдых и категории)</button></form>"
+    m.append(acc("prog-draft", "Черновик и дополнение из Garmin", "", drafts, open_=not data))
+    h.append(acc("prog-manage", "Управление тренировками", "отправка на часы, редактор, версии", "".join(m), open_=not data, force=forced))
     return h
 
 

@@ -10,6 +10,17 @@ from . import garmin_workout as gw
 
 STEP_DEFAULT = {"barbell": 5, "dumbbell": 2.5}
 
+# Бег: необязательные поля level (нагрузка), zone (пульсовая зона Garmin 1–5), duration_min, distance_km.
+# Что не задано — в интерфейсе прочерк. Значение level принимается по-русски и по-английски, ё не обязательна.
+RUN_LEVELS = {"легкий": ("easy", "Лёгкий"), "лёгкий": ("easy", "Лёгкий"), "easy": ("easy", "Лёгкий"),
+              "обычный": ("norm", "Обычный"), "normal": ("norm", "Обычный"),
+              "интенсивный": ("hard", "Интенсивный"), "hard": ("hard", "Интенсивный")}
+
+
+def run_level(v):
+    """-> (css-класс, подпись) или None, если значение не распознано."""
+    return RUN_LEVELS.get(str(v).strip().lower()) if v is not None else None
+
 
 def now():
     return timeutil.now()
@@ -77,6 +88,15 @@ def validate(d):
         day = s.get("day")
         if day is not None and not (isinstance(day, int) and 0 <= day <= 6):
             e.append(f"{w}: day — число 0 (пн) … 6 (вс) или пусто (любой день)")
+        if s.get("kind") == "run":
+            if s.get("level") is not None and run_level(s["level"]) is None:
+                e.append(f"{w}: level — лёгкий, обычный или интенсивный")
+            z = s.get("zone")
+            if z is not None and not (isinstance(z, int) and not isinstance(z, bool) and 1 <= z <= 5):
+                e.append(f"{w}: zone — номер пульсовой зоны Garmin, число 1–5")
+            for k, name, hi in (("duration_min", "время в минутах", 1000), ("distance_km", "расстояние в километрах", 1000)):
+                if s.get(k) is not None and not (_num(s[k]) and 0 < s[k] <= hi):
+                    e.append(f"{w}: {k} — {name}, положительное число")
         if s.get("kind") != "strength":
             continue
         seen = set()

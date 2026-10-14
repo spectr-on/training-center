@@ -5,6 +5,15 @@ from datetime import datetime
 from . import program, timeutil
 
 
+def next_bump(weights):
+    """Индекс подхода, которому будет прибавка по правилу волны: последний среди имеющих минимальный вес.
+    None, если весов нет или упражнение с собственным весом."""
+    if not weights or not any(weights):
+        return None
+    lo = min(weights)
+    return max(i for i, w in enumerate(weights) if w == lo)
+
+
 def next_weights(weights, top_reps, actual, step):
     """weights — план по подходам; actual — [(повторы, кг)] фактических подходов упражнения по порядку.
     Если все плановые подходы сделаны на верх диапазона и на плановый вес (не меньше) — поднимаем на step
@@ -16,8 +25,7 @@ def next_weights(weights, top_reps, actual, step):
     for (reps, kg), w in zip(last, weights):
         if reps < top_reps or kg + 1e-9 < w:
             return None
-    lo = min(weights)
-    idx = max(i for i, w in enumerate(weights) if w == lo)
+    idx = next_bump(weights)
     new = list(weights)
     new[idx] = round(weights[idx] + step, 2)
     return [int(v) if float(v).is_integer() else v for v in new]

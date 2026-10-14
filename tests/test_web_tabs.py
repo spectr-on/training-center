@@ -92,6 +92,75 @@ def test_traffic_morning_and_now_rows():
     assert "Readiness 64" in row and "Body Battery 52" in row and "HRV" not in row and "Сон" not in row and "Пульс" not in row
 
 
+def test_next_bump_matches_progress_rule():
+    from app import progress
+    assert progress.next_bump([90, 95, 95]) == 0           # меньший вес растёт первым
+    assert progress.next_bump([95, 95, 95]) == 2           # поровну — последний подход
+    assert progress.next_bump([60, 60, 65]) == 1
+    assert progress.next_bump([0, 0]) is None and progress.next_bump([]) is None
+    # правило прибавки и подсветка не расходятся
+    assert progress.next_weights([90, 95, 95], 8, [(8, 90), (8, 95), (8, 95)], 5) == [95, 95, 95]
+    assert progress.next_weights([95, 95, 95], 8, [(8, 95)] * 3, 5) == [95, 95, 100]
+
+
+def test_run_fields_validation():
+    from app import program
+    d = {"evaluate_from": "2026-10-14", "progression": {"step_kg": {"barbell": 5, "dumbbell": 2.5}},
+         "sessions": [{"key": "RUN", "name": "Бег", "kind": "run"}]}
+    assert program.validate(d) == []
+    d["sessions"][0].update(level="Лёгкий", zone=2, duration_min=40, distance_km=4.5)
+    assert program.validate(d) == []
+    for k, bad in (("level", "быстрый"), ("zone", 6), ("zone", 0), ("zone", True), ("duration_min", 0), ("distance_km", -1), ("distance_km", "5")):
+        x = {"key": "RUN", "name": "Бег", "kind": "run", k: bad}
+        errs = program.validate({**d, "sessions": [x]})
+        assert len(errs) == 1 and k in errs[0], (k, bad, errs)
+    assert program.run_level("легкий")[0] == "easy" and program.run_level("ИНТЕНСИВНЫЙ")[1] == "Интенсивный" and program.run_level(None) is None
+
+
+def test_program_tab_tables():
+    import yaml
+    from app import program
+    con = fresh()
+    data = {"program": "T", "evaluate_from": "2026-10-14", "progression": {"step_kg": {"barbell": 5, "dumbbell": 2.5}},
+            "sessions": [
+                {"key": "A", "name": "Full Body A", "kind": "strength", "day": 0, "blocks": [
+                    {"type": "single", "exercises": [{"code": "BARBELL_BACK_SQUAT", "reps": [6, 8], "weights": [90, 95, 95]}]},
+                    {"type": "single", "exercises": [{"code": "NEUTRAL_GRIP_PULL_UP", "reps": [5, 7], "weights": [0, 0]}]},
+                    {"type": "superset", "exercises": [
+                        {"code": "DUMBBELL_BICEPS_CURL", "reps": [8, 10], "weights": [10, 10]},
+                        {"code": "DUMBBELL_LYING_TRICEPS_EXTENSION", "reps": [10, 12], "weights": [10, 10]}]}]},
+                {"key": "RUN", "name": "Бег", "kind": "run", "level": "обычный", "zone": 2, "duration_min": 40},
+                {"key": "RUN2", "name": "Бег 2", "kind": "run"}]}
+    program.save_version(con, program.dump(data), "ручная", "т", True)
+    p = web.page(con, {"weight_divisor": 1000.0})
+    # недельная программа и блок управления
+    assert "Недельная программа" in p and "Управление тренировок" not in p and "Управление тренировками" in p
+    assert "4 упражнения, 1 суперсет" in p and "Обычный · Зона 2 · 40 мин" in p and "без параметров" in p
+    # силовая: веса отдельными метками, прибавка у первого подхода (90), у «свой вес» нет
+    assert "<span class='wchip up'" in p and p.count("wchip up") == 3     # присед, оба гантельных упражнения
+    assert ">90</span>" in p and ">свой вес</span>" in p and "6–8" in p
+    i = p.index("wchip up"); assert ">90</span>" in p[i:i + 300]           # стрелка именно на 90
+    # бег: нагрузка, шкала зоны, время, прочерки
+    assert "<span class='dot norm'></span>Обычный" in p and "Зона 2" in p and "40 мин" in p
+    assert p.count("<span class=dash>—</span>") >= 4
+    # служебные разделы внутри «Управления»
+    m = p.index("data-k='prog-manage'")
+    for k in ("prog-push", "prog-yaml", "prog-versions", "prog-draft"):
+        assert p.index(f"data-k='{k}'") > m, k
+    assert p.index("data-k='prog-week'") < p.index("data-k='prog-s-A'") < m
+
+
+def test_week_table_status_pills():
+    from datetime import timedelta
+    con = fresh()
+    mon = timeutil.today() - timedelta(days=timeutil.today().weekday())
+    con.execute("INSERT INTO activity VALUES(1,?,?,?,?)", (f"{mon.isoformat()} 10:00:00", "strength_training", "Full Body A", "{}"))
+    con.commit()
+    p = web.page(con, {"weight_divisor": 1000.0})
+    assert "<table class=w1>" in p and "tr class=cur" in p and "res go" in p and "st done" in p
+    assert "идёт · 1/3" in p
+
+
 if __name__ == "__main__":
     for k, v in list(globals().items()):
         if k.startswith("test_"):
