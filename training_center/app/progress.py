@@ -1,5 +1,6 @@
 """Прибавка веса: волна с последнего подхода по верхней границе диапазона."""
 import copy
+import re
 from datetime import datetime
 
 from . import program, timeutil
@@ -29,6 +30,22 @@ def next_weights(weights, top_reps, actual, step):
     new = list(weights)
     new[idx] = round(weights[idx] + step, 2)
     return [int(v) if float(v).is_integer() else v for v in new]
+
+
+_CHANGE = re.compile(r"([\d.]+(?:/[\d.]+)*) → ([\d.]+(?:/[\d.]+)*)\s*$")
+
+
+def parse_change(text):
+    """Из записи progress_log («Full Body A: КОД 90/95/95 → 95/95/95») -> ([старые веса], [новые веса]) или None."""
+    m = _CHANGE.search(text or "")
+    if not m:
+        return None
+    try:
+        old = [float(x) for x in m.group(1).split("/")]
+        new = [float(x) for x in m.group(2).split("/")]
+    except ValueError:
+        return None
+    return (old, new) if len(old) == len(new) else None
 
 
 def fmt(ws):

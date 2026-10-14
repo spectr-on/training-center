@@ -136,10 +136,8 @@ def test_program_tab_tables():
     # недельная программа и блок управления
     assert "Недельная программа" in p and "Управление тренировок" not in p and "Управление тренировками" in p
     assert "4 упражнения, 1 суперсет" in p and "Обычный · Зона 2 · 40 мин" in p and "без параметров" in p
-    # силовая: веса отдельными метками, прибавка у первого подхода (90), у «свой вес» нет
-    assert "<span class='wchip up'" in p and p.count("wchip up") == 3     # присед, оба гантельных упражнения
-    assert ">90</span>" in p and ">свой вес</span>" in p and "6–8" in p
-    i = p.index("wchip up"); assert ">90</span>" in p[i:i + 300]           # стрелка именно на 90
+    # силовая: веса отдельными метками; без записей о прибавках ничего не подсвечено
+    assert ">90</span>" in p and ">свой вес</span>" in p and "6–8" in p and "wchip up" not in p
     # бег: нагрузка, шкала зоны, время, прочерки
     assert "<span class='dot norm'></span>Обычный" in p and "Зона 2" in p and "40 мин" in p
     assert p.count("<span class=dash>—</span>") >= 4
@@ -148,6 +146,56 @@ def test_program_tab_tables():
     for k in ("prog-push", "prog-yaml", "prog-versions", "prog-draft"):
         assert p.index(f"data-k='{k}'") > m, k
     assert p.index("data-k='prog-week'") < p.index("data-k='prog-s-A'") < m
+
+
+def _gain_setup():
+    import json
+    from app import program
+    con = fresh()
+    data = {"program": "T", "evaluate_from": "2026-10-01", "progression": {"step_kg": {"barbell": 5, "dumbbell": 2.5}},
+            "sessions": [{"key": "A", "name": "Full Body A", "kind": "strength", "day": 0, "blocks": [
+                {"type": "single", "exercises": [{"code": "BARBELL_BACK_SQUAT", "reps": [6, 8], "weights": [95, 95, 95]}]},
+                {"type": "single", "exercises": [{"code": "DUMBBELL_SEATED_PRESS", "reps": [10, 12], "weights": [15, 15, 17.5]}]},
+                {"type": "single", "exercises": [{"code": "BARBELL_BENCH_PRESS", "reps": [6, 8], "weights": [90, 95]}]},
+                {"type": "single", "exercises": [{"code": "BARBELL_ROW", "reps": [8, 10], "weights": [70, 70]}]}]}]}
+    program.save_version(con, program.dump(data), "авто", "т", True)
+    con.execute("INSERT INTO activity VALUES(7,'2026-10-12 10:00:00','strength_training','Full Body A','{}')")
+    for code, txt in (("BARBELL_BACK_SQUAT", "Full Body A: BARBELL_BACK_SQUAT 90/95/95 → 95/95/95"),
+                      ("DUMBBELL_SEATED_PRESS", "Full Body A: DUMBBELL_SEATED_PRESS 15/15/15 → 15/15/17.5"),
+                      ("BARBELL_BENCH_PRESS", "Full Body A: BARBELL_BENCH_PRESS 90/90 → 90/95")):
+        con.execute("INSERT INTO progress_log VALUES(7,?,?,?)", (code, "2026-10-12 12:00:00", txt))
+    con.commit()
+    return con
+
+
+def _up_chips(p):
+    """Подписи подсвеченных меток по порядку на странице."""
+    import re
+    return re.findall(r"<span class='wchip up' title='[^']*'>([^<]*)</span>", p)
+
+
+def test_highlight_follows_suggested_weight_changes():
+    from app import progress
+    assert progress.parse_change("Full Body A: X 15/15/15 → 15/15/17.5") == ([15, 15, 15], [15, 15, 17.5])
+    assert progress.parse_change("нет изменений") is None
+    con = _gain_setup()
+    p = web.page(con, {"weight_divisor": 1000.0})
+    # подсвечены ровно подходы с повышенным весом: присед — первый (95), жим гантелей — последний (17,5), жим штанги — второй (95)
+    assert _up_chips(p) == ["95", "17,5", "95"], _up_chips(p)
+    assert "Прибавка: 90 → 95 кг (по итогам тренировки 12.10)" in p and "Прибавка: 15 → 17,5 кг" in p
+    assert "его предстоит поднять" in p
+    # упражнение без записи (тяга) не подсвечивается, у приседа подсвечен один подход из трёх
+    i = p.index("Приседания"); row = p[i:p.index("</tr>", i)]
+    assert row.count("wchip up") == 1 and row.index("wchip up") < row.index(">95</span><span class=wchip>95")
+    # после следующей тренировки этой сессии прибавка считается поднятой — подсветка гаснет
+    con.execute("INSERT INTO activity VALUES(8,'2026-10-14 10:00:00','strength_training','Full Body A','{}')"); con.commit()
+    assert "wchip up" not in web.page(con, {"weight_divisor": 1000.0})
+    # вес в программе поменяли руками (не равен записанному) — подсветки нет
+    con2 = _gain_setup()
+    con2.execute("UPDATE progress_log SET text='Full Body A: BARBELL_BACK_SQUAT 90/95/95 → 100/95/95' WHERE code='BARBELL_BACK_SQUAT'"); con2.commit()
+    p2 = web.page(con2, {"weight_divisor": 1000.0})
+    i = p2.index("Приседания"); assert "wchip up" not in p2[i:p2.index("</tr>", i)]
+    assert _up_chips(p2) == ["17,5", "95"]
 
 
 def test_week_table_status_pills():

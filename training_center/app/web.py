@@ -337,32 +337,56 @@ def gain_text(r):
     return text.replace(code, ru(code), 1) if code and code in text else text
 
 
-def strength_table(sess, step):
+def pending_gains(con, data):
+    """Прибавки веса, которые ещё предстоит поднять: {ключ тренировки: {код упражнения: (старые, новые, дата)}}.
+    Берутся записи из блока «Предлагаемые изменения веса» (progress_log) по самой свежей тренировке каждой сессии:
+    когда по сессии выполнена следующая тренировка, прибавка считается поднятой и подсветка гасится."""
+    out = {}
+    start = str(data.get("evaluate_from"))
+    for s in data["sessions"]:
+        if s["kind"] != "strength":
+            continue
+        pat = str(s.get("match") or s["name"]).lower()
+        acts = con.execute("SELECT id,name,start_local FROM activity WHERE type_key='strength_training' "
+                           "AND substr(start_local,1,10)>=? ORDER BY start_local DESC", (start,)).fetchall()
+        last = next((a for a in acts if pat in (a["name"] or "").lower()), None)
+        if not last:
+            continue
+        for r in con.execute("SELECT code,text FROM progress_log WHERE activity_id=? AND code!='*'", (last["id"],)):
+            ch = progress.parse_change(r["text"])
+            if ch:
+                d = last["start_local"][:10]
+                out.setdefault(s["key"], {})[r["code"]] = (ch[0], ch[1], f"{d[8:10]}.{d[5:7]}")
+    return out
+
+
+def strength_table(sess, gains=None):
     """Таблица силовой: упражнение, веса по подходам (кг), диапазон повторов.
-    Подход, которому по правилу волны достанется следующая прибавка, подсвечен стрелкой."""
+    Подсвечены подходы, которым вес уже повышен (см. «Предлагаемые изменения веса»), пока их не подняли."""
     e = html.escape
+    gains = gains or {}
     rows, legend = [], False
     for b in sess["blocks"]:
         sup = b["type"] == "superset"
         rounds = max(len(x["weights"]) for x in b["exercises"])
         for x in b["exercises"]:
             ws = x["weights"]
-            eq = x.get("equipment") or program.equipment_of(x["code"], ws)
-            bump = progress.next_bump(ws) if eq in step else None
+            old, new, when = gains.get(x["code"], (None, None, ""))
+            fresh = (new is not None and len(new) == len(ws) and all(abs(a - float(w)) < 1e-6 for a, w in zip(new, ws)))
             chips = []
             for i, w in enumerate(ws):
                 label = "свой вес" if not w else num(w)
-                if i == bump:
+                if fresh and abs(old[i] - new[i]) > 1e-6:
                     legend = True
-                    tip = f"Следующая прибавка: {num(w)} → {num(w + step[eq])} кг, когда все подходы выполнены на верх диапазона"
+                    tip = f"Прибавка: {num(old[i])} → {num(new[i])} кг (по итогам тренировки {when})"
                     chips.append(f"<span class='wchip up' title='{e(tip)}'>{label}</span>")
                 else:
                     chips.append(f"<span class=wchip>{label}</span>")
             tag = f"<span class=tag>Суперсет · {rounds} кр.</span>" if sup else ""
             rows.append(f"<tr{' class=ssr' if sup else ''}><td>{tag}{e(ru(x['code']))}</td><td>{''.join(chips)}</td>"
                         f"<td><span class=reps>{x['reps'][0]}–{x['reps'][1]}</span></td></tr>")
-    note = ("<p class=muted><small>↑ — подход, которому добавится вес, когда все подходы выполнены на верх диапазона повторов. "
-            "Вес в килограммах.</small></p>") if legend else ""
+    note = ("<p class=muted><small>↑ — вес повышен по итогам прошлой тренировки (см. «Предлагаемые изменения веса»), "
+            "его предстоит поднять. Вес в килограммах.</small></p>") if legend else ""
     return ("<table class=prog><thead><tr><th>Упражнение</th><th>Вес, кг</th><th>Повторы</th></tr></thead><tbody>"
             + "".join(rows) + "</tbody></table>" + note)
 
@@ -426,6 +450,7 @@ def program_html(con, notice=None, editor_text=None):
         step = data["progression"]["step_kg"]
         h.append(f"<p class=muted>Активная версия №{row['id']} ({e(row['kind'])}, {e(row['created_at'])}). Прибавка: штанга +{step['barbell']:g} кг, "
                  f"гантели +{step['dumbbell']:g} кг. Тренировки учитываются с {e(str(data['evaluate_from']))}.</p>")
+        gains = pending_gains(con, data)
         names = " · ".join(s["name"] for s in data["sessions"])
         h.append(acc("prog-week", "Недельная программа", names, week_program_table(con, data), open_=True))
         h.append("<div class=grp>Тренировки</div>")
@@ -438,7 +463,7 @@ def program_html(con, notice=None, editor_text=None):
             sent_txt = f" Отправлено в Garmin: «{e(sent['name'])}», {e(sent['updated_at'])}." if sent else " В Garmin ещё не отправлялась."
             sub = f"в Garmin: {sent['updated_at'][8:10]}.{sent['updated_at'][5:7]}" if sent else "в Garmin не отправлялась"
             c = [f"<form method=post action=garmin_send><input type=hidden name=key value='{e(s['key'])}'>"
-                 f"<button class=sec>Отправить в Garmin</button> <small>{sent_txt}</small></form>", strength_table(s, step)]
+                 f"<button class=sec>Отправить в Garmin</button> <small>{sent_txt}</small></form>", strength_table(s, gains.get(s['key']))]
             h.append(acc("prog-s-" + s["key"], s["name"], sub, "".join(c), open_=first))
             first = False
         log = con.execute("SELECT * FROM progress_log WHERE code!='*' ORDER BY at DESC LIMIT 6").fetchall()
