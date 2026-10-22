@@ -120,7 +120,7 @@ def _exercise_notes(con, act, ex, sets, info, div):
             notes.append(f"до верха диапазона ({top}) не дотянул: {', '.join(str(r) for r in short)}")
     log = con.execute("SELECT text FROM progress_log WHERE activity_id=? AND code=?", (act["id"], ex)).fetchone()
     if log:
-        notes.append("верх диапазона на всех подходах, прибавка → " + log["text"].split("→")[-1].strip() + " кг")
+        notes.append("верх диапазона на всех подходах, вес повышен во всех подходах → " + log["text"].split("→")[-1].strip() + " кг; повторы снова с низа диапазона")
     return "; ".join(notes)
 
 

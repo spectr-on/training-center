@@ -50,22 +50,25 @@ def test_push_only_on_real_change():
     def factory():
         logins.append(1); return api
     assert gw.sync_all(con, data, factory) == [] and logins == []           # ничего не изменилось
-    # прибавка 1: 90/95/95 -> 95/95/95. Наибольший вес тот же, значит Garmin обновлять не нужно
+    # прибавка 1: вес растёт во всех подходах сразу: 90/95/95 -> 92.5/97.5/97.5, наибольший вес вырос -> обновляем
     progress.apply_all(con)
     row, data = program.active(con)
-    assert data["sessions"][0]["blocks"][0]["exercises"][0]["weights"] == [95, 95, 95]
-    assert gw.sync_all(con, data, factory) == [] and logins == []
-    # прибавка 2 (после ещё одной выполненной A): 95/95/95 -> 95/95/100, наибольший вес вырос -> обновляем
-    act(3, "2026-10-14", "Full Body A", [("BARBELL_BACK_SQUAT", 8, 95)] * 3)
-    progress.apply_all(con)
-    row, data = program.active(con)
-    assert data["sessions"][0]["blocks"][0]["exercises"][0]["weights"] == [95, 95, 100]
+    assert data["sessions"][0]["blocks"][0]["exercises"][0]["weights"] == [92.5, 97.5, 97.5]
     res = gw.sync_all(con, data, factory)
     assert res and res[0][0] == "A" and res[0][1] is True and logins == [1]
-    assert api.calls[-1] == ("update", 501) and first_weight(api.last) == 100
+    assert api.calls[-1] == ("update", 501) and first_weight(api.last) == 97.5
     assert gw.sync_all(con, data, factory) == []                           # после обновления расхождения нет
+    # прибавка 2 (после ещё одной выполненной A): 92.5/97.5/97.5 -> 95/100/100
+    act(3, "2026-10-14", "Full Body A", [("BARBELL_BACK_SQUAT", 8, 92.5), ("BARBELL_BACK_SQUAT", 8, 97.5), ("BARBELL_BACK_SQUAT", 8, 97.5)])
+    progress.apply_all(con)
+    row, data = program.active(con)
+    assert data["sessions"][0]["blocks"][0]["exercises"][0]["weights"] == [95, 100, 100]
+    res = gw.sync_all(con, data, factory)
+    assert res and res[0][0] == "A" and res[0][1] is True and logins == [1, 1]
+    assert api.calls[-1] == ("update", 501) and first_weight(api.last) == 100
+    assert gw.sync_all(con, data, factory) == []
     log = con.execute("SELECT * FROM push_log ORDER BY id").fetchall()
-    assert [r["ok"] for r in log] == [1, 1] and log[0]["why"] == "вручную"
+    assert [r["ok"] for r in log] == [1, 1, 1] and log[0]["why"] == "вручную"
 
 
 def test_failure_is_retried_next_time():

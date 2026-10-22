@@ -3,19 +3,31 @@ sys.path.insert(0, str(pathlib.Path(__file__).resolve().parents[1] / "training_c
 from app import db, program, progress
 
 
-def test_wave():
+def test_all_sets_step():
     nw = progress.next_weights
     full = [(8, 90), (8, 95), (8, 95)]
-    assert nw([90, 95, 95], 8, full, 5) == [95, 95, 95]          # поднимаем отстающий первый подход
-    assert nw([95, 95, 95], 8, [(8, 95)] * 3, 5) == [95, 95, 100]  # цикл закончен -> с последнего
-    assert nw([90, 90, 90], 8, [(8, 90)] * 3, 5) == [90, 90, 95]   # старт волны с последнего
-    assert nw([90, 90, 95], 8, [(8, 90), (8, 90), (8, 95)], 5) == [90, 95, 95]
+    assert nw([90, 95, 95], 8, full, 5) == [95, 100, 100]        # вес растёт во всех подходах сразу
+    assert nw([95, 95, 95], 8, [(8, 95)] * 3, 2.5) == [97.5, 97.5, 97.5]
+    assert nw([10, 10], 12, [(12, 10)] * 2, 1.25) == [11.25, 11.25]
     assert nw([90, 95, 95], 8, [(8, 90), (7, 95), (8, 95)], 5) is None  # один подход не дотянул
     assert nw([90, 95, 95], 8, [(8, 90), (8, 95)], 5) is None           # не все подходы
     assert nw([90, 95, 95], 8, [(8, 85), (8, 95), (8, 95)], 5) is None  # вес ниже планового
-    assert nw([5, 5, 5, 5], 20, [(20, 5)] * 4, 2.5) == [5, 5, 5, 7.5]
+    assert nw([5, 5, 5, 5], 20, [(20, 5)] * 4, 2.5) == [7.5] * 4
     assert nw([0, 0, 0], 7, [(7, 0)] * 3, 5) is None                    # свой вес
-    assert nw([90, 95, 95], 8, [(5, 40), (8, 90), (8, 95), (8, 95)], 5) == [95, 95, 95]  # разминка в начале не мешает
+    assert nw([90, 95, 95], 8, [(8, 90), (8, 95), (8, 95)], None) is None  # шага нет
+    assert nw([90, 95, 95], 8, [(5, 40), (8, 90), (8, 95), (8, 95)], 5) == [95, 100, 100]  # разминка в начале не мешает
+
+
+def test_step_of():
+    so = program.step_of
+    assert so({"code": "BARBELL_BACK_SQUAT", "weights": [90]}) == 2.5          # штанга по умолчанию
+    assert so({"code": "DUMBBELL_CURL", "weights": [10]}) == 1.25               # гантели по умолчанию (на гантель)
+    assert so({"code": "BARBELL_BACK_SQUAT", "weights": [90], "step_kg": 5}) == 5
+    assert so({"code": "DUMBBELL_CURL", "weights": [10], "step_kg": 2.5}) == 2.5
+    assert so({"code": "CABLE_ROW", "weights": [40]}) is None                   # другой снаряд: шага по умолчанию нет
+    assert so({"code": "CABLE_ROW", "weights": [40], "step_kg": 2.5}) == 2.5
+    assert so({"code": "NEUTRAL_GRIP_PULL_UP", "weights": [0, 0]}) is None      # свой вес
+    assert so({"code": "BARBELL_BACK_SQUAT", "weights": [90], "step_kg": 0}) == 2.5  # некорректное значение -> по умолчанию
 
 
 def mkdb():
@@ -57,20 +69,37 @@ def test_draft_validate_progress():
     d2["sessions"][0]["blocks"][0]["exercises"][0]["reps"] = [6, 8]
     program.save_version(con, program.dump(d2), "ручная", "правка", True)
     ev = progress.apply_all(con)
-    assert any("BARBELL_BACK_SQUAT 90/95/95 → 95/95/95" in x for x in ev), ev
+    assert any("BARBELL_BACK_SQUAT 90/95/95 → 92.5/97.5/97.5" in x for x in ev), ev
     assert not progress.apply_all(con)                       # повторно ничего не делает
     row, cur = program.active(con)
-    assert cur["sessions"][0]["blocks"][0]["exercises"][0]["weights"] == [95, 95, 95] and row["kind"] == "авто"
+    assert cur["sessions"][0]["blocks"][0]["exercises"][0]["weights"] == [92.5, 97.5, 97.5] and row["kind"] == "авто"
     # следующая A с новыми весами
-    act(3, "2026-10-14", "Full Body A", [("BARBELL_BACK_SQUAT", 8, 95)] * 3)
+    act(3, "2026-10-14", "Full Body A", [("BARBELL_BACK_SQUAT", 8, 92.5), ("BARBELL_BACK_SQUAT", 8, 97.5), ("BARBELL_BACK_SQUAT", 8, 97.5)])
     ev = progress.apply_all(con)
-    assert any("95/95/95 → 95/95/100" in x for x in ev), ev
+    assert any("92.5/97.5/97.5 → 95/100/100" in x for x in ev), ev
 
 
 def test_validation_errors():
-    bad = {"progression": {"step_kg": {"barbell": 5}}, "sessions": [{"key": "A", "kind": "x", "name": "A"}]}
+    bad = {"sessions": [{"key": "A", "kind": "x", "name": "A"}]}
     errs = program.validate(bad)
-    assert any("dumbbell" in x for x in errs) and any("evaluate_from" in x for x in errs) and any("kind" in x for x in errs)
+    assert any("evaluate_from" in x for x in errs) and any("kind" in x for x in errs)
+    assert not any("step_kg" in x for x in errs)                   # общий progression.step_kg больше не нужен
+
+
+def test_step_kg_field():
+    def mk(step):
+        ex = {"code": "BARBELL_BACK_SQUAT", "reps": [6, 8], "weights": [90, 90]}
+        if step is not None:
+            ex["step_kg"] = step
+        return {"evaluate_from": "2026-10-14", "sessions": [{"key": "A", "name": "A", "kind": "strength",
+                "blocks": [{"type": "single", "exercises": [ex]}]}]}
+    assert program.validate(mk(None)) == [] and program.validate(mk(5)) == [] and program.validate(mk(1.25)) == []
+    for bad in (0, -2.5, "5", True, [5]):
+        errs = program.validate(mk(bad))
+        assert len(errs) == 1 and "step_kg" in errs[0], (bad, errs)
+    # старые программы с progression.step_kg остаются допустимыми (поле игнорируется)
+    old = mk(None); old["progression"] = {"rule": "волна с последнего подхода", "step_kg": {"barbell": 5, "dumbbell": 2.5}}
+    assert program.validate(old) == []
 
 
 def test_rollback():

@@ -8,7 +8,10 @@ from . import timeutil
 from .blocks import group_blocks
 from . import garmin_workout as gw
 
-STEP_DEFAULT = {"barbell": 5, "dumbbell": 2.5}
+# Шаг повышения веса по умолчанию, кг: штанга — общий вес, гантели — на одну гантель.
+# Для конкретного упражнения его переопределяет поле step_kg в YAML.
+STEP_DEFAULT = {"barbell": 2.5, "dumbbell": 1.25}
+RULE_TEXT = "все подходы на верх диапазона → вес растёт во всех подходах сразу на step_kg, повторы возвращаются к низу диапазона"
 
 # Бег: необязательные поля level (нагрузка), zone (пульсовая зона Garmin 1–5), duration_min, distance_km.
 # Что не задано — в интерфейсе прочерк. Значение level принимается по-русски и по-английски, ё не обязательна.
@@ -37,6 +40,15 @@ def equipment_of(code, weights):
     return "other"
 
 
+def step_of(ex):
+    """Шаг повышения веса упражнения, кг: поле step_kg, иначе значение по умолчанию для снаряда.
+    None — шага нет (свой вес или снаряд без шага по умолчанию: тогда автоповышения нет, пока step_kg не задан)."""
+    if _num(ex.get("step_kg")) and ex["step_kg"] > 0:
+        return ex["step_kg"]
+    eq = ex.get("equipment") or equipment_of(ex.get("code"), ex.get("weights") or [])
+    return STEP_DEFAULT.get(eq)
+
+
 def dump(data):
     return yaml.safe_dump(data, allow_unicode=True, sort_keys=False, default_flow_style=None, width=100)
 
@@ -58,11 +70,6 @@ def validate(d):
     e = []
     if not isinstance(d, dict):
         return ["Программа должна быть словарём (ключи: program, progression, sessions)."]
-    prog = d.get("progression") or {}
-    step = prog.get("step_kg") or {}
-    for k in ("barbell", "dumbbell"):
-        if not (_num(step.get(k)) and step[k] > 0):
-            e.append(f"progression.step_kg.{k}: нужно положительное число (кг)")
     ef = d.get("evaluate_from")
     try:
         date.fromisoformat(str(ef))
@@ -125,6 +132,9 @@ def validate(d):
                 ws = x.get("weights")
                 if not (isinstance(ws, list) and ws and all(_num(v) and v >= 0 for v in ws)):
                     e.append(f"{n}: weights — список весов по подходам в кг (0 = свой вес)")
+                st = x.get("step_kg")
+                if st is not None and not (_num(st) and st > 0):
+                    e.append(f"{n}: step_kg — шаг повышения веса, кг (положительное число; штанга — общий вес, гантели — на гантель)")
                 rs = x.get("rest_sec")
                 if rs is not None and not (isinstance(rs, int) and 0 < rs <= 900):
                     e.append(f"{n}: rest_sec — отдых после подхода, секунды (1–900)")
@@ -174,7 +184,7 @@ def rollback(con, version_id):
 def build_draft(con, divisor=1000.0):
     data = {"program": "Full Body",
             "evaluate_from": timeutil.today().isoformat(),
-            "progression": {"rule": "волна с последнего подхода", "step_kg": dict(STEP_DEFAULT)},
+            "progression": {"rule": RULE_TEXT},
             "sessions": []}
     missing = []
     for key, pat in (("A", "full body a"), ("B", "full body b")):
@@ -198,8 +208,11 @@ def build_draft(con, divisor=1000.0):
                 mine = [x for x in b["items"] if x["exercise"] == c]
                 top = max(x["reps"] for x in mine)
                 ws = [round(x["kg"], 2) if round(x["kg"], 2) % 1 else int(round(x["kg"])) for x in mine]
-                ex = {"code": c, "equipment": equipment_of(c, ws), "reps": [max(1, top - 2), top], "weights": ws,
-                      "rest_sec": rests.get(c, gw.DEFAULT_REST)}
+                eq = equipment_of(c, ws)
+                ex = {"code": c, "equipment": eq, "reps": [max(1, top - 2), top], "weights": ws}
+                if eq in STEP_DEFAULT:
+                    ex["step_kg"] = STEP_DEFAULT[eq]
+                ex["rest_sec"] = rests.get(c, gw.DEFAULT_REST)
                 cat = cats.get(c) or gw.guess_category(c)
                 if cat:
                     ex["category"] = cat

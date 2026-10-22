@@ -1,4 +1,4 @@
-"""Прибавка веса: волна с последнего подхода по верхней границе диапазона."""
+"""Повышение веса: все подходы на верху диапазона → вес растёт во всех подходах сразу на step_kg упражнения."""
 import copy
 import re
 from datetime import datetime
@@ -6,29 +6,20 @@ from datetime import datetime
 from . import program, timeutil
 
 
-def next_bump(weights):
-    """Индекс подхода, которому будет прибавка по правилу волны: последний среди имеющих минимальный вес.
-    None, если весов нет или упражнение с собственным весом."""
-    if not weights or not any(weights):
-        return None
-    lo = min(weights)
-    return max(i for i, w in enumerate(weights) if w == lo)
-
-
 def next_weights(weights, top_reps, actual, step):
     """weights — план по подходам; actual — [(повторы, кг)] фактических подходов упражнения по порядку.
-    Если все плановые подходы сделаны на верх диапазона и на плановый вес (не меньше) — поднимаем на step
-    последний подход среди имеющих минимальный вес. Иначе None (ничего не меняем)."""
+    Условие: все плановые подходы сделаны на верх диапазона и на плановый вес (не меньше).
+    Тогда вес поднимается сразу во всех подходах на step (подходы со «своим весом», 0, не трогаем);
+    повторы при этом возвращаются к нижней границе диапазона — диапазон в программе не меняется,
+    цель следующей тренировки — его низ. Иначе None (ничего не меняем)."""
     n = len(weights)
-    if n == 0 or not any(weights) or len(actual) < n:
+    if n == 0 or not any(weights) or not step or len(actual) < n:
         return None
     last = actual[-n:]
     for (reps, kg), w in zip(last, weights):
         if reps < top_reps or kg + 1e-9 < w:
             return None
-    idx = next_bump(weights)
-    new = list(weights)
-    new[idx] = round(weights[idx] + step, 2)
+    new = [round(w + step, 2) if w else w for w in weights]
     return [int(v) if float(v).is_integer() else v for v in new]
 
 
@@ -60,7 +51,6 @@ def apply_all(con, divisor=1000.0):
         return []
     data = copy.deepcopy(data)
     start = str(data.get("evaluate_from"))
-    step = data["progression"]["step_kg"]
     events, changed = [], False
     acts = con.execute("SELECT * FROM activity WHERE type_key='strength_training' AND substr(start_local,1,10)>=? "
                        "ORDER BY start_local", (start,)).fetchall()
@@ -75,11 +65,11 @@ def apply_all(con, divisor=1000.0):
                 "SELECT * FROM workout_set WHERE activity_id=? AND set_type='ACTIVE' ORDER BY idx", (a["id"],))]
             for b in sess["blocks"]:
                 for ex in b["exercises"]:
-                    eq = ex.get("equipment") or program.equipment_of(ex["code"], ex["weights"])
-                    if eq not in step:
+                    step = program.step_of(ex)
+                    if not step:
                         continue
                     actual = [(r, k) for c, r, k in sets if c == ex["code"]]
-                    new = next_weights(ex["weights"], ex["reps"][1], actual, step[eq])
+                    new = next_weights(ex["weights"], ex["reps"][1], actual, step)
                     if new:
                         text = f"{sess['name']}: {ex['code']} {fmt(ex['weights'])} → {fmt(new)}"
                         ex["weights"] = new

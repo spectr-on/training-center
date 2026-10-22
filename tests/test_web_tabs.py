@@ -92,20 +92,16 @@ def test_traffic_morning_and_now_rows():
     assert "Readiness 64" in row and "Body Battery 52" in row and "HRV" not in row and "Сон" not in row and "Пульс" not in row
 
 
-def test_next_bump_matches_progress_rule():
+def test_progress_rule_all_sets_at_once():
     from app import progress
-    assert progress.next_bump([90, 95, 95]) == 0           # меньший вес растёт первым
-    assert progress.next_bump([95, 95, 95]) == 2           # поровну — последний подход
-    assert progress.next_bump([60, 60, 65]) == 1
-    assert progress.next_bump([0, 0]) is None and progress.next_bump([]) is None
-    # правило прибавки и подсветка не расходятся
-    assert progress.next_weights([90, 95, 95], 8, [(8, 90), (8, 95), (8, 95)], 5) == [95, 95, 95]
-    assert progress.next_weights([95, 95, 95], 8, [(8, 95)] * 3, 5) == [95, 95, 100]
+    # правило прибавки и подсветка не расходятся: вес растёт во всех подходах сразу
+    assert progress.next_weights([90, 95, 95], 8, [(8, 90), (8, 95), (8, 95)], 5) == [95, 100, 100]
+    assert progress.next_weights([95, 95, 95], 8, [(8, 95)] * 3, 2.5) == [97.5, 97.5, 97.5]
 
 
 def test_run_fields_validation():
     from app import program
-    d = {"evaluate_from": "2026-10-14", "progression": {"step_kg": {"barbell": 5, "dumbbell": 2.5}},
+    d = {"evaluate_from": "2026-10-14", "progression": {"rule": "x"},
          "sessions": [{"key": "RUN", "name": "Бег", "kind": "run"}]}
     assert program.validate(d) == []
     d["sessions"][0].update(level="Лёгкий", zone=2, duration_min=40, distance_km=4.5)
@@ -121,7 +117,7 @@ def test_program_tab_tables():
     import yaml
     from app import program
     con = fresh()
-    data = {"program": "T", "evaluate_from": "2026-10-14", "progression": {"step_kg": {"barbell": 5, "dumbbell": 2.5}},
+    data = {"program": "T", "evaluate_from": "2026-10-14", "progression": {"rule": "x"},
             "sessions": [
                 {"key": "A", "name": "Full Body A", "kind": "strength", "day": 0, "blocks": [
                     {"type": "single", "exercises": [{"code": "BARBELL_BACK_SQUAT", "reps": [6, 8], "weights": [90, 95, 95]}]},
@@ -152,7 +148,7 @@ def _gain_setup():
     import json
     from app import program
     con = fresh()
-    data = {"program": "T", "evaluate_from": "2026-10-01", "progression": {"step_kg": {"barbell": 5, "dumbbell": 2.5}},
+    data = {"program": "T", "evaluate_from": "2026-10-01", "progression": {"rule": "x"},
             "sessions": [{"key": "A", "name": "Full Body A", "kind": "strength", "day": 0, "blocks": [
                 {"type": "single", "exercises": [{"code": "BARBELL_BACK_SQUAT", "reps": [6, 8], "weights": [95, 95, 95]}]},
                 {"type": "single", "exercises": [{"code": "DUMBBELL_SEATED_PRESS", "reps": [10, 12], "weights": [15, 15, 17.5]}]},

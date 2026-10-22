@@ -447,9 +447,10 @@ def program_html(con, notice=None, editor_text=None):
     if notice:
         h.append(f"<div class=err>{notice}</div>")
     if data:
-        step = data["progression"]["step_kg"]
-        h.append(f"<p class=muted>Активная версия №{row['id']} ({e(row['kind'])}, {e(row['created_at'])}). Прибавка: штанга +{step['barbell']:g} кг, "
-                 f"гантели +{step['dumbbell']:g} кг. Тренировки учитываются с {e(str(data['evaluate_from']))}.</p>")
+        h.append(f"<p class=muted>Активная версия №{row['id']} ({e(row['kind'])}, {e(row['created_at'])}). Когда все подходы выполнены на верху диапазона, "
+                 f"вес растёт во всех подходах сразу на шаг упражнения (step_kg; по умолчанию штанга +{program.STEP_DEFAULT['barbell']:g} кг, "
+                 f"гантели +{program.STEP_DEFAULT['dumbbell']:g} кг на гантель), повторы возвращаются к низу диапазона. "
+                 f"Тренировки учитываются с {e(str(data['evaluate_from']))}.</p>")
         gains = pending_gains(con, data)
         names = " · ".join(s["name"] for s in data["sessions"])
         h.append(acc("prog-week", "Недельная программа", names, week_program_table(con, data), open_=True))
@@ -496,7 +497,7 @@ def program_html(con, notice=None, editor_text=None):
                      f"<form method=post action=program><textarea name=yaml rows=30>{e(text)}</textarea><br>"
                      "<button>Проверить и сохранить новой версией</button></form>"
                      "<p><small>Вес в Garmin уходит по верхней границе диапазона повторов; диапазон хранится здесь как справка и для прибавки веса. "
-                     "weights — вес по подходам (кг), 0 — свой вес. day: 0 (пн) … 6 (вс) или без day — любой день. "
+                     "weights — вес по подходам (кг), 0 — свой вес. step_kg — шаг повышения веса упражнения, кг (штанга — общий вес, гантели — на гантель; без поля: штанга 2,5, гантели 1,25; у других снарядов без step_kg вес сам не повышается). day: 0 (пн) … 6 (вс) или без day — любой день. "
                      "Для бега (kind: run) необязательно: level — лёгкий/обычный/интенсивный, zone — зона Garmin 1–5, "
                      "duration_min — минуты, distance_km — километры.</small></p>", force=forced))
     vers = con.execute("SELECT * FROM program_version ORDER BY id DESC LIMIT 8").fetchall()
