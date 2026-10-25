@@ -51,6 +51,7 @@ def metrics(con, d):
     m["sleep_h"] = None if sec is None else round(sec / 3600, 1)
     sc = find_key(sleep, "sleepScores") if sleep else None
     m["sleep_score"] = (sc or {}).get("overall", {}).get("value") if isinstance(sc, dict) else None
+    m["sleep_stress"] = find_key(sleep, "avgSleepStress") if sleep else None
     m["hrv"] = find_key(hrv, "lastNightAvg") if hrv else None
     rhr = find_key(stats, "restingHeartRate") if stats else None
     m["rhr"] = rhr if rhr is not None else (find_key(sleep, "restingHeartRate") if sleep else None)

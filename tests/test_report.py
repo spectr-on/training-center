@@ -25,7 +25,7 @@ def test_build_has_all_blocks():
     t = report.build(con, today=TODAY)
     for s in ("# Отчёт о тренировках", "Период: 2026-10-07 — 2026-10-13", "## Светофор", "## План и факт",
               "### 2026-10-12 · Full Body A · done", "## Следующая тренировка", "## Бег", "| 10-11 | 5,2 | 6:05 | 148 |",
-              "## Восстановление", "кальян", "## Вопросы для ИИ", report.DEFAULT_QUESTION):
+              "## Восстановление", "## Факторы дня", "| 10-12 | да | — | — | — |", "## Вопросы для ИИ", report.DEFAULT_QUESTION):
         assert s in t, s
     assert "90×8, 95×8, 95×8" in t and "свой вес×7, свой вес×7" in t
     assert "token" not in t.lower()
@@ -120,3 +120,22 @@ if __name__ == "__main__":
     for k, v in list(globals().items()):
         if k.startswith("test_"):
             v(); print("ok", k)
+
+
+def test_lifestyle_block_new_format():
+    con = setup()
+    day = lambda d, items: con.execute("INSERT OR REPLACE INTO daily_raw VALUES(?,?,?,'x')",
+                                       (d, "lifestyle", json.dumps({"dailyLogsReport": items})))
+    day("2026-10-11", [{"name": "Кальян", "logStatus": "YES", "measurementType": "QUANTITY", "details": [{"amount": 3}]},
+                       {"name": "Alcohol", "logStatus": "YES", "measurementType": "QUANTITY",
+                        "details": [{"subTypeId": 1, "subTypeName": "BEER", "amount": 1}]},
+                       {"name": "Healthy Meals", "logStatus": "YES", "measurementType": "NONE"},
+                       {"name": "Болезнь", "logStatus": "NO", "measurementType": "NONE"}])
+    day("2026-10-13", [{"name": "Кальян", "measurementType": "QUANTITY"}, {"name": "Alcohol", "measurementType": "QUANTITY",
+                       "details": [{"subTypeName": "BEER"}]}])          # ничего не отмечено -> строки нет
+    con.commit()
+    t = report.build(con, today=TODAY)
+    assert "| 10-11 | 3 | пиво 1 | нет | здоровая еда |" in t, t
+    assert "| 10-13 |" not in t.split("## Факторы дня")[1].split("Дата —")[0]
+    assert "фактор дня —" not in t
+    assert "| Дата | Сон, ч | Sleep Score | Стресс во сне | HRV |" in t

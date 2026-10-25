@@ -6,13 +6,12 @@ from pathlib import Path
 
 from . import traffic, program, plan, timeutil, body, settings as stg
 from .exercise_names import ru
-from .lifestyle import parse_day
+from .lifestyle import parse_log, cell, other_cell
 
 RULES_VERSION = 1
 DEFAULT_REPO = "spectr-on/training-reports"
 DEFAULT_QUESTION = "Оцени неделю, найди проблемы, предложи правки программы."
 COLOR = {"green": "зелёный", "yellow": "жёлтый", "red": "красный"}
-FACTOR = {"alcohol": "алкоголь", "hookah": "кальян", "illness": "болезнь"}
 BLOCKS = {"traffic": "Светофор", "recovery": "Восстановление"}
 
 
@@ -30,10 +29,10 @@ def _sets_text(sets):
     return ", ".join(f"{'свой вес' if not kg else n(kg)}×{reps}" for reps, kg in sets)
 
 
-def _daily_lifestyle(con, d):
+def _daily_log(con, d):
     r = con.execute("SELECT json FROM daily_raw WHERE date=? AND kind='lifestyle'", (d,)).fetchone()
     try:
-        return parse_day(json.loads(r["json"])) if r else {}
+        return parse_log(json.loads(r["json"])) if r else {}
     except Exception:
         return {}
 
@@ -263,16 +262,35 @@ def build(con, today=None, days=7, div=1000.0, hide=()):
     L.append("")
 
     if "recovery" not in hide:
-        L += ["## Восстановление", "| Дата | Сон, ч | HRV | Пульс покоя | Body Battery |", "|---|---|---|---|---|"]
+        L += ["## Восстановление", "| Дата | Сон, ч | Sleep Score | Стресс во сне | HRV | Пульс покоя | Body Battery |", "|---|---|---|---|---|---|---|"]
         for d in _days(start, today):
             m = traffic.metrics(con, d.isoformat())
             if all(m[k] is None for k in ("sleep_h", "hrv", "rhr", "bb")):
                 continue
             f = lambda v: "—" if v is None else (n(v) if isinstance(v, float) else v)
-            L.append(f"| {d.strftime('%m-%d')} | {f(m['sleep_h'])} | {f(m['hrv'])} | {f(m['rhr'])} | {f(m['bb'])} |")
+            L.append(f"| {d.strftime('%m-%d')} | {f(m['sleep_h'])} | {f(m['sleep_score'])} | {f(m['sleep_stress'])} | "
+                     f"{f(m['hrv'])} | {f(m['rhr'])} | {f(m['bb'])} |")
         if L[-1].startswith("|---"):
-            L.append("| | нет данных | | | |")
+            L.append("| | нет данных | | | | | |")
         L.append("")
+
+    if "lifestyle" not in hide:
+        L += ["## Факторы дня", "| Дата | Кальян | Алкоголь | Болезнь | Другое |", "|---|---|---|---|---|"]
+        rows = 0
+        for d in _days(start, today):
+            log = _daily_log(con, d.isoformat())
+            if not any(r["status"] for r in log.values()):
+                continue
+            L.append(f"| {d.strftime('%m-%d')} | {cell(log.get('hookah'))} | {cell(log.get('alcohol'))} | "
+                     f"{cell(log.get('illness'))} | {other_cell(log)} |")
+            rows += 1
+        if not rows:
+            L.append("| | нет отметок | | | |")
+        L += ["",
+              "Дата — день, к которому отнесена отметка (вечер этого дня). Влияние на сон и восстановление смотри в утренней строке "
+              "СЛЕДУЮЩЕЙ даты в «Светофоре» и «Восстановлении». «нет» — явно отмечено «Нет»; «—» — не отмечено (это не значит «не было»). "
+              "Кальян и алкоголь — количество, если указано; старые записи кальяна (до смены пункта на числовой) — только «да» без количества. "
+              "Дней без строки нет: журнал за них не загружен или ничего не отмечено.", ""]
 
     L += _weight_block(con, today, days)
     L += _measure_block(con)
@@ -286,10 +304,6 @@ def build(con, today=None, days=7, div=1000.0, hide=()):
         notes.append("Полных замеров лентой ещё не было" if last is None else
                      f"Пора делать замеры лентой: последние {last}, прошло {passed} дн. (интервал {iv} дн.)")
 
-    for d in _days(start, today):
-        fac = _daily_lifestyle(con, d.isoformat())
-        if fac:
-            notes.append(f"{d.strftime('%m-%d')}: фактор дня — {', '.join(FACTOR[k] for k in fac)}")
     L.append("## Замечания")
     L += [f"- {x}" for x in notes] or ["- Замечаний нет."]
     L += ["", "## Вопросы для ИИ", stg.get("report_question") or DEFAULT_QUESTION, ""]

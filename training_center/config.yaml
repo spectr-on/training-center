@@ -1,5 +1,5 @@
 name: Тренировочный центр
-version: "0.12.0"
+version: "0.13.0"
 slug: training_center
 description: Синхронизация Garmin, план тренировок, светофор и отчёты
 arch: [amd64, aarch64]
