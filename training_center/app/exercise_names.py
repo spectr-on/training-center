@@ -45,7 +45,7 @@ NAMES = {
     "SINGLE_ARM_DUMBBELL_OVERHEAD_TRICEPS_EXTENSION": "Французский жим гантели одной рукой над головой",
     "OVERHEAD_DUMBBELL_PRESS": "Жим гантелей над головой",
     "REVERSE_FLYE": "Разведение в наклоне на заднюю дельту",
-    "STANDING_BARBBELL_CALF_RAISE": "Подъем на носках стоя со штангой",
+    "STANDING_BARBELL_CALF_RAISE": "Подъем на носках стоя со штангой"
 }
 
 
